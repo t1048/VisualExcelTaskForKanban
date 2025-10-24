@@ -1,0 +1,2 @@
+# VisualExcelTaskForKanban
+Excelファイルのタスク一覧からカンバン形式で可視化するソース
