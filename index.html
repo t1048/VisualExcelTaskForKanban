@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>タスク・カンバン</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      /* slate-900 */
+      --panel: #111827;
+      /* gray-900 */
+      --col: #0b1220;
+      /* deep panel */
+      --card: #111827;
+      /* gray-900 */
+      --accent: #60a5fa;
+      /* blue-400 */
+      --accent-2: #34d399;
+      /* emerald-400 */
+      --text: #e5e7eb;
+      /* gray-200 */
+      --muted: #9ca3af;
+      /* gray-400 */
+      --danger: #ef4444;
+      /* red-500 */
+      --yellow: #f59e0b;
+      /* amber-500 */
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      --radius: 14px;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 20% 0%, #0b1840, #0f172a 60%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(8px);
+      box-shadow: var(--shadow);
+      z-index: 50;
+    }
+
+    .toolbar .title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-right: auto;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: #0b2a52;
+      color: #cfe6ff;
+      box-shadow: var(--shadow);
+      transition: transform .07s ease, background .2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #1553b8, #0ea5e9);
+      color: white;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #0e9f6e, #22c55e);
+      color: white;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: white;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      box-shadow: none;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-left: 8px;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .column {
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 220px;
+      overflow: hidden;
+    }
+
+    .column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .column-title {
+      font-weight: 600;
+    }
+
+    .column-count {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .column-body {
+      padding: 12px;
+      gap: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 150px;
+    }
+
+    .dropzone {
+      border: 2px dashed transparent;
+      border-radius: 12px;
+      padding: 4px;
+      transition: border-color .15s ease, background .15s ease;
+    }
+
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(96, 165, 250, 0.07);
+    }
+
+    .card {
+      background: linear-gradient(180deg, #111827, #0d1424);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+      cursor: grab;
+    }
+
+    .card:active {
+      cursor: grabbing;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .card-no {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .card-title {
+      font-weight: 600;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .badge-assignee {
+      color: #c4f5d2;
+      background: rgba(52, 211, 153, 0.12);
+    }
+
+    .badge-date {
+      color: #fde68a;
+      background: rgba(245, 158, 11, 0.12);
+    }
+
+    .card-meta {
+      display: flex;
+      gap: 6px;
+      margin: 6px 0 8px;
+      flex-wrap: wrap;
+    }
+
+    .card-notes {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
+    /* ==== Filters ==== */
+    .filters-bar {
+      display: flex;
+      gap: 14px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      padding: 8px 16px 0;
+      margin: 0 0 8px;
+    }
+
+    .filter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 160px;
+    }
+
+    .filter label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .filter select,
+    .filter input[type="date"] {
+      background: #0a1020;
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 6px 10px;
+    }
+
+    .status-checks {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-checks label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      background: #0a1020;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+    }
+
+    .filters-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    /* モーダル */
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 100;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(680px, calc(100% - 24px));
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .modal-title {
+      font-weight: 700;
+    }
+
+    .form {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .form .row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .form input[type="text"],
+    .form input[type="date"],
+    .form select,
+    .form textarea {
+      background: #0a1020;
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+
+    .form textarea {
+      min-height: 80px;
+      grid-column: 1 / -1;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .danger {
+      color: #ffd6d6;
+    }
+
+    .footer-hint {
+      color: var(--muted);
+      font-size: 12px;
+      padding: 0 16px 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <div class="title">タスク・カンバン</div>
+    <button id="btn-add" class="btn btn-primary">＋ 追加</button>
+    <button id="btn-save" class="btn btn-success">保存</button>
+    <button id="btn-reload" class="btn">再読込</button>
+    <span class="hint">ドラッグ＆ドロップで列に移動できます</span>
+  </div>
+
+
+  <!-- フィルター -->
+  <div class="filters-bar" id="filters-bar">
+    <div class="filter">
+      <label for="flt-assignee">担当者</label>
+      <select id="flt-assignee">
+        <option value="__ALL__">（全員）</option>
+      </select>
+    </div>
+
+    <div class="filter" style="min-width:260px;flex:1;">
+      <label>ステータス</label>
+      <div class="status-checks" id="flt-statuses"></div>
+    </div>
+
+    <div class="filter" style="min-width:320px;">
+      <label>期限</label>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="flt-date-mode" title="期限フィルター">
+          <option value="none">指定なし</option>
+          <option value="range">範囲指定</option>
+          <option value="before">指定日以前</option>
+          <option value="after">指定日以後</option>
+        </select>
+        <input type="date" id="flt-date-from" />
+        <span id="flt-date-sep" style="display:none;">〜</span>
+        <input type="date" id="flt-date-to" style="display:none;" />
+      </div>
+    </div>
+
+    <div class="filters-actions">
+      <button id="btn-clear-filters" class="btn">フィルター解除</button>
+    </div>
+  </div>
+
+
+  <div id="board" class="board" aria-live="polite"></div>
+  <div class="footer-hint">※ 期限は YYYY-MM-DD（例: 2025-10-25）</div>
+
+  <!-- 編集モーダル -->
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">タスク編集</div>
+        <button id="btn-close" class="btn btn-ghost">✕</button>
+      </div>
+      <form id="task-form" class="form">
+        <input type="hidden" id="f-no" />
+        <div class="row">
+          <label for="f-status">ステータス</label>
+          <select id="f-status"></select>
+        </div>
+        <div class="row">
+          <label for="f-assignee">担当者</label>
+          <input type="text" id="f-assignee" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-title">タスク</label>
+          <input type="text" id="f-title" />
+        </div>
+        <div class="row">
+          <label for="f-due">期限</label>
+          <input type="date" id="f-due" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-notes">備考</label>
+          <textarea id="f-notes"></textarea>
+        </div>
+        <div class="modal-actions" id="modal-actions">
+          <button type="button" id="btn-delete" class="btn btn-danger">削除</button>
+          <span style="flex:1"></span>
+          <button type="button" id="btn-cancel" class="btn">キャンセル</button>
+          <button type="submit" class="btn btn-success">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    /* ===================== ランタイム切替（mock / pywebview） ===================== */
+    let api;                  // 実際に使う API （後で差し替える）
+    let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
+    let WIRED = false;        // ツールバー多重バインド防止
+
+
+    // DOM 準備
+    function ready(fn) {
+      if (document.readyState !== 'loading') return fn();
+      document.addEventListener('DOMContentLoaded', fn);
+    }
+
+    // pywebview が利用可能になったタイミングで API を差し替えて強制再初期化
+    window.addEventListener('pywebviewready', async () => {
+      try {
+        api = window.pywebview.api;
+        RUN_MODE = 'pywebview';
+        console.log('[kanban] switched to pywebview API');
+        await init(true);  // Excelから取り直し
+      } catch (e) {
+        console.error('pywebviewready error:', e);
+      }
+    });
+
+    ready(async () => {
+      api = window.pywebview.api;
+      RUN_MODE = 'pywebview';
+      console.log('[kanban] run mode:', RUN_MODE);
+      await init(true);
+    });
+
+    /* ===================== 状態 ===================== */
+    let STATUSES = [];
+    let FILTERS = {
+      assignee: '__ALL__',
+      statuses: new Set(),              // 初期化時に全ONにする
+      date: { mode: 'none', from: '', to: '' }
+    };
+    let TASKS = [];
+    let CURRENT_EDIT = null;
+
+    /* ===================== 初期化 ===================== */
+    async function init(force = false) {
+      if (force) {
+        if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
+          try {
+            const r = await api.reload_from_excel();
+            if (r?.tasks) TASKS = r.tasks;
+            if (r?.statuses) STATUSES = r.statuses;
+          } catch (e) {
+            console.warn('reload_from_excel failed, fallback to get_*', e);
+            STATUSES = await api.get_statuses();
+            TASKS = await api.get_tasks();
+          }
+        } else {
+          STATUSES = await api.get_statuses();
+          TASKS = await api.get_tasks();
+        }
+      }
+      renderBoard();
+      buildFiltersUI();   // 初回＆再読込時にフィルタUIを最新へ
+      if (!WIRED) { wireToolbar(); WIRED = true; }
+    }
+
+    /* ===================== レンダリング ===================== */
+    function renderBoard() {
+      const board = document.getElementById('board');
+      board.innerHTML = '';
+
+      const FILTERED = getFilteredTasks();  // ← 追加
+
+      STATUSES.forEach(status => {
+        const col = document.createElement('section');
+        col.className = 'column';
+        col.dataset.status = status;
+
+        const header = document.createElement('div');
+        header.className = 'column-header';
+        const title = document.createElement('div');
+        title.className = 'column-title';
+        title.textContent = status;
+        const count = document.createElement('div');
+        count.className = 'column-count';
+        // ↓ 絞り込み済みから件数を出す
+        count.textContent = `${FILTERED.filter(t => t.ステータス === status).length} 件`;
+
+        header.appendChild(title);
+        header.appendChild(count);
+
+        const body = document.createElement('div');
+        body.className = 'column-body';
+        const drop = document.createElement('div');
+        drop.className = 'dropzone';
+        drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+        drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+        drop.addEventListener('drop', e => onDropCard(e, status, drop));
+
+        // ↓ 絞り込み済みから、その列のカードを描画
+        FILTERED
+          .filter(t => t.ステータス === status)
+          .sort((a, b) => (a.No || 0) - (b.No || 0))
+          .forEach(task => drop.appendChild(renderCard(task)));
+
+        body.appendChild(drop);
+        col.appendChild(header);
+        col.appendChild(body);
+        board.appendChild(col);
+      });
+    }
+
+
+    function uniqAssignees() {
+      const set = new Set();
+      TASKS.forEach(t => { if ((t.担当者 || '').trim()) set.add(t.担当者.trim()); });
+      return Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
+    }
+
+    function buildFiltersUI() {
+      // ステータス（チェックボックス）
+      const wrap = document.getElementById('flt-statuses');
+      wrap.innerHTML = '';
+      if (FILTERS.statuses.size === 0) {
+        // 初期は全ON
+        STATUSES.forEach(s => FILTERS.statuses.add(s));
+      }
+      STATUSES.forEach(s => {
+        const id = 'st-' + btoa(unescape(encodeURIComponent(s))).replace(/=/g, '');
+        const lbl = document.createElement('label');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.id = id; cb.value = s; cb.checked = FILTERS.statuses.has(s);
+        cb.addEventListener('change', () => {
+          if (cb.checked) FILTERS.statuses.add(s); else FILTERS.statuses.delete(s);
+          renderBoard();
+        });
+        const span = document.createElement('span'); span.textContent = s;
+        lbl.appendChild(cb); lbl.appendChild(span);
+        wrap.appendChild(lbl);
+      });
+
+      // 担当者（セレクト）
+      const sel = document.getElementById('flt-assignee');
+      const selected = FILTERS.assignee;
+      const list = uniqAssignees();
+      sel.innerHTML = '<option value="__ALL__">（全員）</option>' +
+        list.map(a => `<option value="${a}">${a}</option>`).join('');
+      sel.value = list.includes(selected) ? selected : '__ALL__';
+      sel.onchange = () => { FILTERS.assignee = sel.value; renderBoard(); };
+
+      // 期限（モード＆日付）
+      const modeSel = document.getElementById('flt-date-mode');
+      const fromEl = document.getElementById('flt-date-from');
+      const toEl = document.getElementById('flt-date-to');
+      const sepEl = document.getElementById('flt-date-sep');
+
+      // 既存値の反映
+      modeSel.value = FILTERS.date.mode || 'none';
+      fromEl.value = FILTERS.date.from || '';
+      toEl.value = FILTERS.date.to || '';
+
+      const updateVisibility = () => {
+        const m = modeSel.value;
+        if (m === 'none') {
+          fromEl.style.display = '';
+          toEl.style.display = 'none';
+          sepEl.style.display = 'none';
+        } else if (m === 'before') {
+          fromEl.style.display = '';
+          toEl.style.display = 'none';
+          sepEl.style.display = 'none';
+        } else if (m === 'after') {
+          fromEl.style.display = '';
+          toEl.style.display = 'none';
+          sepEl.style.display = 'none';
+        } else { // range
+          fromEl.style.display = '';
+          toEl.style.display = '';
+          sepEl.style.display = '';
+        }
+      };
+      updateVisibility();
+
+      modeSel.onchange = () => { FILTERS.date.mode = modeSel.value; updateVisibility(); renderBoard(); };
+      fromEl.onchange = () => { FILTERS.date.from = fromEl.value; renderBoard(); };
+      toEl.onchange = () => { FILTERS.date.to = toEl.value; renderBoard(); };
+
+      // 解除ボタン
+      document.getElementById('btn-clear-filters').onclick = () => {
+        FILTERS = { assignee: '__ALL__', statuses: new Set(STATUSES), date: { mode: 'none', from: '', to: '' } };
+        buildFiltersUI();
+        renderBoard();
+      };
+    }
+
+
+    function renderCard(task) {
+      const el = document.createElement('article');
+      el.className = 'card';
+      el.draggable = true;
+      el.dataset.no = task.No;
+
+      el.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', String(task.No));
+        e.dataTransfer.dropEffect = 'move';
+      });
+
+      el.addEventListener('dblclick', () => openEdit(task.No));
+
+      const header = document.createElement('div');
+      header.className = 'card-header';
+      const title = document.createElement('div');
+      title.className = 'card-title';
+      title.textContent = task.タスク || '(無題)';
+      const no = document.createElement('div');
+      no.className = 'card-no';
+      no.textContent = `#${task.No}`;
+      header.appendChild(title);
+      header.appendChild(no);
+
+      const meta = document.createElement('div');
+      meta.className = 'card-meta';
+      if (task.担当者) {
+        const b1 = document.createElement('span'); b1.className = 'badge badge-assignee'; b1.textContent = task.担当者; meta.appendChild(b1);
+      }
+      if (task.期限) {
+        const b2 = document.createElement('span'); b2.className = 'badge badge-date'; b2.textContent = task.期限; meta.appendChild(b2);
+      }
+
+      const notes = document.createElement('div');
+      notes.className = 'card-notes';
+      notes.textContent = task.備考 || '';
+
+      el.appendChild(header);
+      el.appendChild(meta);
+      el.appendChild(notes);
+      return el;
+    }
+
+    /* ===================== DnD ===================== */
+    async function onDropCard(e, newStatus, dropzone) {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      const no = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      if (!no) return;
+
+      try {
+        await api.move_task(no, newStatus);
+        const idx = TASKS.findIndex(t => t.No === no);
+        if (idx >= 0) TASKS[idx].ステータス = newStatus;
+        renderBoard();
+      } catch (err) {
+        alert('移動に失敗しました: ' + (err?.message || err));
+      }
+    }
+
+    /* ===================== ツールバー ===================== */
+    function wireToolbar() {
+      document.getElementById('btn-add').addEventListener('click', () => openCreate());
+      document.getElementById('btn-save').addEventListener('click', async () => {
+        try {
+          const p = await api.save_excel();
+          alert('Excelへ保存しました\n' + p);
+        } catch (e) {
+          alert('保存に失敗: ' + (e?.message || e));
+        }
+      });
+      document.getElementById('btn-reload').addEventListener('click', async () => {
+        try {
+          const r = await api.reload_from_excel();
+          if (r?.tasks) TASKS = r.tasks;
+          if (r?.statuses) STATUSES = r.statuses;
+          renderBoard();
+          buildFiltersUI();
+        } catch (e) {
+          alert('再読込に失敗: ' + (e?.message || e));
+        }
+      });
+    }
+
+    function parseISO(d) {
+      // 'YYYY-MM-DD' を Date に（失敗は null）
+      if (!d) return null;
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+      if (!m) return null;
+      const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    function getFilteredTasks() {
+      const assignee = FILTERS.assignee;
+      const statuses = FILTERS.statuses;
+      const df = FILTERS.date;
+
+      return TASKS.filter(t => {
+        // 担当者
+        if (assignee !== '__ALL__') {
+          if ((t.担当者 || '') !== assignee) return false;
+        }
+        // ステータス
+        if (!statuses.has(t.ステータス)) return false;
+
+        // 期限
+        if (df.mode === 'none') return true;
+        const due = parseISO(t.期限 || '');
+        if (!due) return false; // 期限が無いカードは条件指定時は除外
+
+        if (df.mode === 'before') {
+          const d = parseISO(df.from);
+          if (!d) return true; // 入力未指定なら全通し
+          // 期限 <= 指定日
+          return (due.getTime() <= d.getTime());
+        }
+        if (df.mode === 'after') {
+          const d = parseISO(df.from);
+          if (!d) return true;
+          // 期限 >= 指定日
+          return (due.getTime() >= d.getTime());
+        }
+        if (df.mode === 'range') {
+          const f = parseISO(df.from);
+          const t2 = parseISO(df.to);
+          if (f && t2) return (f.getTime() <= due.getTime() && due.getTime() <= t2.getTime());
+          if (f && !t2) return (f.getTime() <= due.getTime());
+          if (!f && t2) return (due.getTime() <= t2.getTime());
+          return true;
+        }
+        return true;
+      });
+    }
+
+
+    /* ===================== モーダル: 追加/編集 ===================== */
+    function openCreate() {
+      CURRENT_EDIT = null;
+      openModal({
+        No: '',
+        ステータス: STATUSES[0] || '未着手',
+        タスク: '',
+        担当者: '',
+        期限: '',
+        備考: ''
+      }, { mode: 'create' });
+    }
+    function openEdit(no) {
+      const t = TASKS.find(x => x.No === no);
+      if (!t) return;
+      CURRENT_EDIT = no;
+      openModal(t, { mode: 'edit' });
+    }
+
+    function openModal(task, { mode }) {
+      const modal = document.getElementById('modal');
+      const title = document.getElementById('modal-title');
+      const fno = document.getElementById('f-no');
+      const fstat = document.getElementById('f-status');
+      const fttl = document.getElementById('f-title');
+      const fwho = document.getElementById('f-assignee');
+      const fdue = document.getElementById('f-due');
+      const fnote = document.getElementById('f-notes');
+      const btnDelete = document.getElementById('btn-delete');
+
+      title.textContent = mode === 'create' ? 'タスク追加' : 'タスク編集';
+
+      // ステータス選択肢
+      fstat.innerHTML = '';
+      STATUSES.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s; opt.textContent = s;
+        fstat.appendChild(opt);
+      });
+
+      fno.value = task.No ?? '';
+      fstat.value = task.ステータス || STATUSES[0] || '未着手';
+      fttl.value = task.タスク || '';
+      fwho.value = task.担当者 || '';
+      fdue.value = (task.期限 || '').slice(0, 10);
+      fnote.value = task.備考 || '';
+
+      btnDelete.style.display = (mode === 'edit') ? 'inline-flex' : 'none';
+
+      // ハンドラ
+      document.getElementById('btn-close').onclick = closeModal;
+      document.getElementById('btn-cancel').onclick = closeModal;
+      btnDelete.onclick = async () => {
+        if (!CURRENT_EDIT) return;
+        if (!confirm('削除しますか？')) return;
+        try {
+          const ok = await api.delete_task(CURRENT_EDIT);
+          if (ok) {
+            TASKS = TASKS.filter(x => x.No !== CURRENT_EDIT);
+            closeModal(); renderBoard(); buildFiltersUI();
+          } else {
+            alert('削除できませんでした');
+          }
+        } catch (e) {
+          alert('削除に失敗: ' + (e?.message || e));
+        }
+      };
+
+      const form = document.getElementById('task-form');
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const payload = {
+          ステータス: fstat.value.trim(),
+          タスク: fttl.value.trim(),
+          担当者: fwho.value.trim(),
+          期限: fdue.value ? fdue.value : '',
+          備考: fnote.value
+        };
+
+        try {
+          if (mode === 'create') {
+            const created = await api.add_task(payload);
+            TASKS.push(created);
+          } else {
+            const no = CURRENT_EDIT;
+            const updated = await api.update_task(no, payload);
+            const i = TASKS.findIndex(x => x.No === no);
+            if (i >= 0) TASKS[i] = updated;
+          }
+          closeModal(); renderBoard(); buildFiltersUI();
+        } catch (err) {
+          alert('保存に失敗: ' + (err?.message || err));
+        }
+      };
+
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+    function closeModal() {
+      const modal = document.getElementById('modal');
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+  </script>
+</body>
+
+</html>
