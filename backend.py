@@ -27,6 +27,7 @@ REQUIRED_COLUMNS = [
     "備考",
 ]
 DEFAULT_STATUSES = ["未着手", "進行中", "完了", "保留"]
+MAX_VALIDATION_CELLS = 10000
 
 
 def _to_iso_date_str(value) -> str:
@@ -196,17 +197,49 @@ class TaskStore:
                 target_ws = wb[sheet_name]
             except KeyError:
                 return []
+            try:
+                min_col, min_row, max_col, max_row = range_boundaries(range_part)
+            except ValueError:
+                return []
+
+            try:
+                used_min_col, used_min_row, used_max_col, used_max_row = range_boundaries(
+                    target_ws.calculate_dimension()
+                )
+            except ValueError:
+                used_min_col = used_max_col = min_col
+                used_min_row = used_max_row = min_row
+
+            min_col = max(min_col, used_min_col)
+            max_col = min(max_col, used_max_col)
+            min_row = max(min_row, used_min_row)
+            max_row = min(max_row, used_max_row)
+
+            if min_col > max_col or min_row > max_row:
+                return []
+
+            width = max_col - min_col + 1
+            height = max_row - min_row + 1
+            if width * height > MAX_VALIDATION_CELLS:
+                max_height = max(1, MAX_VALIDATION_CELLS // width)
+                max_row = min(max_row, min_row + max_height - 1)
+
             values: List[str] = []
-            for row in target_ws[range_part]:
-                cells = row if isinstance(row, (list, tuple)) else (row,)
-                for cell in cells:
+            seen = set()
+            for row in target_ws.iter_rows(
+                min_row=min_row,
+                max_row=max_row,
+                min_col=min_col,
+                max_col=max_col,
+            ):
+                for cell in row:
                     if cell.value is None:
                         continue
                     text = str(cell.value).strip()
-                    if not text:
+                    if not text or text in seen:
                         continue
-                    if text not in values:
-                        values.append(text)
+                    seen.add(text)
+                    values.append(text)
             return values
         return []
 
