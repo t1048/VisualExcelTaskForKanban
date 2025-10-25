@@ -219,6 +219,13 @@
       flex-wrap: wrap;
     }
 
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 8px;
+    }
+
     .card-notes {
       font-size: 12px;
       color: var(--muted);
@@ -248,12 +255,17 @@
     }
 
     .filter select,
-    .filter input[type="date"] {
+    .filter input[type="date"],
+    .filter input[type="text"] {
       background: #0a1020;
       color: var(--text);
       border: 1px solid rgba(255, 255, 255, 0.12);
       border-radius: 10px;
       padding: 6px 10px;
+    }
+
+    .filter select[multiple] {
+      min-height: 96px;
     }
 
     .status-checks {
@@ -348,6 +360,11 @@
       grid-column: 1 / -1;
     }
 
+    .badge-tag {
+      color: #bfdbfe;
+      background: rgba(96, 165, 250, 0.18);
+    }
+
     .modal-actions {
       display: flex;
       gap: 10px;
@@ -380,6 +397,11 @@
 
   <!-- フィルター -->
   <div class="filters-bar" id="filters-bar">
+    <div class="filter" style="min-width:220px;flex:1;">
+      <label for="flt-keyword">キーワード</label>
+      <input type="text" id="flt-keyword" placeholder="タスク・備考・タグを検索" />
+    </div>
+
     <div class="filter">
       <label for="flt-assignee">担当者</label>
       <select id="flt-assignee">
@@ -405,6 +427,11 @@
         <span id="flt-date-sep" style="display:none;">〜</span>
         <input type="date" id="flt-date-to" style="display:none;" />
       </div>
+    </div>
+
+    <div class="filter" style="min-width:220px;flex:1;">
+      <label for="flt-tags">タグ</label>
+      <select id="flt-tags" multiple size="4"></select>
     </div>
 
     <div class="filters-actions">
@@ -440,6 +467,10 @@
         <div class="row">
           <label for="f-due">期限</label>
           <input type="date" id="f-due" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-tags">タグ（カンマ区切り）</label>
+          <input type="text" id="f-tags" placeholder="例: フロントエンド, 緊急" />
         </div>
         <div class="row" style="grid-column: 1/-1;">
           <label for="f-notes">備考</label>
@@ -492,7 +523,9 @@
     let FILTERS = {
       assignee: '__ALL__',
       statuses: new Set(),              // 初期化時に全ONにする
-      date: { mode: 'none', from: '', to: '' }
+      date: { mode: 'none', from: '', to: '' },
+      keyword: '',
+      tags: new Set()
     };
     let TASKS = [];
     let CURRENT_EDIT = null;
@@ -515,6 +548,8 @@
           TASKS = await api.get_tasks();
         }
       }
+      TASKS = Array.isArray(TASKS) ? TASKS.map(normalizeTask) : [];
+
       if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
         STATUSES.forEach(s => FILTERS.statuses.add(s));
       }
@@ -576,6 +611,18 @@
       return Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
     }
 
+    function uniqTags() {
+      const set = new Set();
+      TASKS.forEach(t => {
+        const tags = Array.isArray(t.タグ) ? t.タグ : [];
+        tags.forEach(tag => {
+          const str = (tag || '').trim();
+          if (str) set.add(str);
+        });
+      });
+      return Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
+    }
+
     function buildFiltersUI() {
       // ステータス（チェックボックス）
       const wrap = document.getElementById('flt-statuses');
@@ -598,6 +645,11 @@
         wrap.appendChild(lbl);
       });
 
+      // キーワード
+      const keywordEl = document.getElementById('flt-keyword');
+      keywordEl.value = FILTERS.keyword || '';
+      keywordEl.oninput = () => { FILTERS.keyword = keywordEl.value; renderBoard(); };
+
       // 担当者（セレクト）
       const sel = document.getElementById('flt-assignee');
       const selected = FILTERS.assignee;
@@ -606,6 +658,36 @@
         list.map(a => `<option value="${a}">${a}</option>`).join('');
       sel.value = list.includes(selected) ? selected : '__ALL__';
       sel.onchange = () => { FILTERS.assignee = sel.value; renderBoard(); };
+
+      // タグ（マルチセレクト）
+      const tagsSel = document.getElementById('flt-tags');
+      const allTags = uniqTags();
+      const retained = new Set();
+      allTags.forEach(tag => { if (FILTERS.tags.has(tag)) retained.add(tag); });
+      FILTERS.tags = retained;
+
+      tagsSel.innerHTML = '';
+      if (allTags.length === 0) {
+        const opt = document.createElement('option');
+        opt.textContent = 'タグがありません';
+        opt.disabled = true;
+        tagsSel.appendChild(opt);
+        tagsSel.disabled = true;
+      } else {
+        tagsSel.disabled = false;
+        allTags.forEach(tag => {
+          const opt = document.createElement('option');
+          opt.value = tag;
+          opt.textContent = tag;
+          opt.selected = FILTERS.tags.has(tag);
+          tagsSel.appendChild(opt);
+        });
+      }
+      tagsSel.onchange = () => {
+        const selectedTags = Array.from(tagsSel.selectedOptions).map(opt => opt.value);
+        FILTERS.tags = new Set(selectedTags);
+        renderBoard();
+      };
 
       // 期限（モード＆日付）
       const modeSel = document.getElementById('flt-date-mode');
@@ -646,7 +728,13 @@
 
       // 解除ボタン
       document.getElementById('btn-clear-filters').onclick = () => {
-        FILTERS = { assignee: '__ALL__', statuses: new Set(STATUSES), date: { mode: 'none', from: '', to: '' } };
+        FILTERS = {
+          assignee: '__ALL__',
+          statuses: new Set(STATUSES),
+          date: { mode: 'none', from: '', to: '' },
+          keyword: '',
+          tags: new Set()
+        };
         buildFiltersUI();
         renderBoard();
       };
@@ -686,12 +774,26 @@
         const b2 = document.createElement('span'); b2.className = 'badge badge-date'; b2.textContent = task.期限; meta.appendChild(b2);
       }
 
+      const tagsList = Array.isArray(task.タグ) ? task.タグ : [];
+      let tagsWrap = null;
+      if (tagsList.length > 0) {
+        tagsWrap = document.createElement('div');
+        tagsWrap.className = 'card-tags';
+        tagsList.forEach(tag => {
+          const badge = document.createElement('span');
+          badge.className = 'badge badge-tag';
+          badge.textContent = tag;
+          tagsWrap.appendChild(badge);
+        });
+      }
+
       const notes = document.createElement('div');
       notes.className = 'card-notes';
       notes.textContent = task.備考 || '';
 
       el.appendChild(header);
       el.appendChild(meta);
+      if (tagsWrap) el.appendChild(tagsWrap);
       el.appendChild(notes);
       return el;
     }
@@ -727,7 +829,11 @@
       document.getElementById('btn-reload').addEventListener('click', async () => {
         try {
           const r = await api.reload_from_excel();
-          if (r?.tasks) TASKS = r.tasks;
+          if (r?.tasks) {
+            TASKS = Array.isArray(r.tasks) ? r.tasks.map(normalizeTask) : [];
+          } else {
+            TASKS = [];
+          }
           if (r?.statuses) STATUSES = r.statuses;
           if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
             STATUSES.forEach(s => FILTERS.statuses.add(s));
@@ -752,42 +858,91 @@
       return isNaN(dt.getTime()) ? null : dt;
     }
 
+    function normalizeTags(value) {
+      const result = [];
+      const push = (tag) => {
+        if (!tag && tag !== 0) return;
+        const str = String(tag).trim();
+        if (!str) return;
+        if (!result.includes(str)) result.push(str);
+      };
+
+      if (Array.isArray(value)) {
+        value.forEach(push);
+      } else if (value && typeof value === 'object' && value !== null && Symbol.iterator in value) {
+        Array.from(value).forEach(push);
+      } else if (typeof value === 'string') {
+        const replaced = value.replace(/[\n、]/g, ',');
+        replaced.split(',').forEach(push);
+      } else {
+        push(value);
+      }
+
+      return result;
+    }
+
+    function normalizeTask(task) {
+      if (!task || typeof task !== 'object') return { No: null, ステータス: '', タグ: [] };
+      const copy = { ...task };
+      copy.タグ = normalizeTags(task.タグ);
+      return copy;
+    }
+
     function getFilteredTasks() {
       const assignee = FILTERS.assignee;
       const statuses = FILTERS.statuses;
       const df = FILTERS.date;
+      const keyword = (FILTERS.keyword || '').trim().toLowerCase();
+      const selectedTags = Array.from(FILTERS.tags || []);
+      const selectedTagsLower = selectedTags.map(tag => String(tag).toLowerCase());
 
       return TASKS.filter(t => {
-        // 担当者
-        if (assignee !== '__ALL__') {
-          if ((t.担当者 || '') !== assignee) return false;
+        if (assignee !== '__ALL__' && (t.担当者 || '') !== assignee) {
+          return false;
         }
-        // ステータス
-        if (!statuses.has(t.ステータス)) return false;
 
-        // 期限
+        if (!statuses.has(t.ステータス)) {
+          return false;
+        }
+
+        const tagsList = Array.isArray(t.タグ) ? t.タグ : [];
+        if (selectedTagsLower.length > 0) {
+          const cardTagsLower = tagsList.map(tag => String(tag).toLowerCase());
+          for (const tag of selectedTagsLower) {
+            if (!cardTagsLower.includes(tag)) return false;
+          }
+        }
+
+        if (keyword) {
+          const haystack = [
+            t.タスク || '',
+            t.備考 || '',
+            tagsList.join(' ')
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(keyword)) return false;
+        }
+
         if (df.mode === 'none') return true;
+
         const due = parseISO(t.期限 || '');
         if (!due) return false; // 期限が無いカードは条件指定時は除外
 
         if (df.mode === 'before') {
           const d = parseISO(df.from);
           if (!d) return true; // 入力未指定なら全通し
-          // 期限 <= 指定日
-          return (due.getTime() <= d.getTime());
+          return due.getTime() <= d.getTime();
         }
         if (df.mode === 'after') {
           const d = parseISO(df.from);
           if (!d) return true;
-          // 期限 >= 指定日
-          return (due.getTime() >= d.getTime());
+          return due.getTime() >= d.getTime();
         }
         if (df.mode === 'range') {
           const f = parseISO(df.from);
           const t2 = parseISO(df.to);
-          if (f && t2) return (f.getTime() <= due.getTime() && due.getTime() <= t2.getTime());
-          if (f && !t2) return (f.getTime() <= due.getTime());
-          if (!f && t2) return (due.getTime() <= t2.getTime());
+          if (f && t2) return f.getTime() <= due.getTime() && due.getTime() <= t2.getTime();
+          if (f && !t2) return f.getTime() <= due.getTime();
+          if (!f && t2) return due.getTime() <= t2.getTime();
           return true;
         }
         return true;
@@ -804,7 +959,8 @@
         タスク: '',
         担当者: '',
         期限: '',
-        備考: ''
+        備考: '',
+        タグ: []
       }, { mode: 'create' });
     }
     function openEdit(no) {
@@ -822,6 +978,7 @@
       const fttl = document.getElementById('f-title');
       const fwho = document.getElementById('f-assignee');
       const fdue = document.getElementById('f-due');
+      const ftags = document.getElementById('f-tags');
       const fnote = document.getElementById('f-notes');
       const btnDelete = document.getElementById('btn-delete');
 
@@ -840,6 +997,7 @@
       fttl.value = task.タスク || '';
       fwho.value = task.担当者 || '';
       fdue.value = (task.期限 || '').slice(0, 10);
+      ftags.value = normalizeTags(task.タグ).join(', ');
       fnote.value = task.備考 || '';
 
       btnDelete.style.display = (mode === 'edit') ? 'inline-flex' : 'none';
@@ -871,18 +1029,19 @@
           タスク: fttl.value.trim(),
           担当者: fwho.value.trim(),
           期限: fdue.value ? fdue.value : '',
-          備考: fnote.value
+          備考: fnote.value,
+          タグ: normalizeTags(ftags.value)
         };
 
         try {
           if (mode === 'create') {
             const created = await api.add_task(payload);
-            TASKS.push(created);
+            TASKS.push(normalizeTask(created));
           } else {
             const no = CURRENT_EDIT;
             const updated = await api.update_task(no, payload);
             const i = TASKS.findIndex(x => x.No === no);
-            if (i >= 0) TASKS[i] = updated;
+            if (i >= 0) TASKS[i] = normalizeTask(updated);
           }
           closeModal(); renderBoard(); buildFiltersUI();
         } catch (err) {

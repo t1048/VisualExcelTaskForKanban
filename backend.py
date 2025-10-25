@@ -14,7 +14,7 @@ import pandas as pd
 import webview
 
 
-REQUIRED_COLUMNS = ["No", "ステータス", "タスク", "担当者", "期限", "備考"]
+REQUIRED_COLUMNS = ["No", "ステータス", "タスク", "担当者", "期限", "タグ", "備考"]
 DEFAULT_STATUSES = ["未着手", "進行中", "完了", "保留"]
 
 
@@ -37,6 +37,35 @@ def _from_iso_date_str(value: str):
         return pd.to_datetime(value).date()
     except Exception:
         return pd.NaT
+
+
+def _ensure_tags_list(value: Any) -> List[str]:
+    result: List[str] = []
+
+    def push(item: Any):
+        if item is None:
+            return
+        if isinstance(item, float) and pd.isna(item):
+            return
+        text = str(item).strip()
+        if text and text not in result:
+            result.append(text)
+
+    if isinstance(value, str):
+        normalized = value.replace("\n", ",").replace("、", ",")
+        for part in normalized.split(","):
+            push(part)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            push(item)
+    else:
+        push(value)
+
+    return result
+
+
+def _tags_to_cell(tags: List[str]) -> str:
+    return ", ".join(tag.strip() for tag in tags if str(tag).strip())
 
 
 class TaskStore:
@@ -106,6 +135,7 @@ class TaskStore:
             "タスク": "" if pd.isna(row["タスク"]) else str(row["タスク"]),
             "担当者": "" if pd.isna(row["担当者"]) else str(row["担当者"]),
             "期限": _to_iso_date_str(row["期限"]),
+            "タグ": _ensure_tags_list(row.get("タグ")),
             "備考": "" if pd.isna(row["備考"]) else str(row["備考"]),
         }
 
@@ -129,6 +159,7 @@ class TaskStore:
             assignee = str(task.get("担当者", "") or "").strip()
             notes = str(task.get("備考", "") or "")
             due = _from_iso_date_str(task.get("期限", ""))
+            tags_list = _ensure_tags_list(task.get("タグ", []))
 
             row = {
                 "No": int(no_value),
@@ -136,6 +167,7 @@ class TaskStore:
                 "タスク": title,
                 "担当者": assignee,
                 "期限": due,
+                "タグ": _tags_to_cell(tags_list),
                 "備考": notes,
             }
 
@@ -160,6 +192,9 @@ class TaskStore:
                 self._df.at[i, "担当者"] = str(patch["担当者"] or "").strip()
             if "期限" in patch:
                 self._df.at[i, "期限"] = _from_iso_date_str(patch["期限"])
+            if "タグ" in patch:
+                tags_list = _ensure_tags_list(patch["タグ"])
+                self._df.at[i, "タグ"] = _tags_to_cell(tags_list)
             if "備考" in patch:
                 self._df.at[i, "備考"] = str(patch["備考"] or "")
 
