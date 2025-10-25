@@ -48,7 +48,7 @@ def _from_iso_date_str(value: str):
 
 
 def _normalize_priority(value: Any):
-    if value in (None, "", pd.NA):
+    if value is None or value is pd.NA:
         return pd.NA
 
     if isinstance(value, str):
@@ -56,6 +56,9 @@ def _normalize_priority(value: Any):
         if not trimmed:
             return pd.NA
         value = trimmed
+
+    if pd.isna(value):
+        return pd.NA
 
     try:
         num = float(value)
