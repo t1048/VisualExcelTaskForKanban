@@ -12,6 +12,9 @@ import datetime as dt
 
 import pandas as pd
 import webview
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.datavalidation import DataValidation
 
 
 REQUIRED_COLUMNS = [
@@ -89,6 +92,8 @@ class TaskStore:
         self._lock = threading.RLock()
         self._df = pd.DataFrame(columns=REQUIRED_COLUMNS)
         self._statuses: List[str] = list(DEFAULT_STATUSES)
+        self._sheet_name: str | None = None
+        self._validations: Dict[str, List[str]] = {}
         self.load_excel()
 
     def load_excel(self):
@@ -97,9 +102,16 @@ class TaskStore:
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
                 df.to_excel(self.excel_path, index=False)
 
+            wb = load_workbook(self.excel_path, data_only=False)
+            sheet_name = wb.sheetnames[0]
+            ws = wb[sheet_name]
+            self._sheet_name = sheet_name
+            self._validations = self._extract_validations(wb, ws)
+
             df = pd.read_excel(
                 self.excel_path,
                 dtype={"No": "Int64"},
+                sheet_name=sheet_name,
                 engine="openpyxl",
             )
 
@@ -112,16 +124,128 @@ class TaskStore:
             if "期限" in df.columns:
                 df["期限"] = pd.to_datetime(df["期限"], errors="coerce").dt.date
 
-            status_values = [
-                s for s in df["ステータス"].dropna().astype(str).tolist() if s
-            ]
-            merged: List[str] = []
-            for name in status_values + DEFAULT_STATUSES:
-                if name not in merged:
-                    merged.append(name)
-            self._statuses = merged
+            if self._validations.get("ステータス"):
+                base = list(self._validations["ステータス"])
+                extras = [
+                    s
+                    for s in df["ステータス"].dropna().astype(str).tolist()
+                    if s and s not in base
+                ]
+                self._statuses = base + extras
+            else:
+                self._rebuild_statuses_from_df(df)
+
             self._df = df
-            self._statuses = ["未着手", "進行中", "完了", "保留"]
+
+    def _rebuild_statuses_from_df(self, df: pd.DataFrame | None = None):
+        if df is None:
+            df = self._df
+        status_values = [
+            s for s in df["ステータス"].dropna().astype(str).tolist() if s
+        ]
+        merged: List[str] = []
+        for name in status_values + DEFAULT_STATUSES:
+            if name not in merged:
+                merged.append(name)
+        self._statuses = merged
+
+    def _extract_validations(self, wb, ws) -> Dict[str, List[str]]:
+        validations: Dict[str, List[str]] = {}
+        dv_list = getattr(ws, "data_validations", None)
+        if not dv_list:
+            return validations
+
+        for dv in getattr(dv_list, "dataValidation", []) or []:
+            if dv.type != "list":
+                continue
+            values = self._resolve_validation_values(wb, ws, dv)
+            if not values:
+                continue
+            try:
+                ranges = list(dv.ranges)
+            except TypeError:
+                ranges = []
+            for cell_range in ranges:
+                min_col, min_row, max_col, max_row = range_boundaries(str(cell_range))
+                for col_idx in range(min_col, max_col + 1):
+                    header = ws.cell(row=1, column=col_idx).value
+                    if isinstance(header, str) and header in REQUIRED_COLUMNS:
+                        validations[header] = list(values)
+        return validations
+
+    def _resolve_validation_values(self, wb, ws, dv) -> List[str]:
+        formula = (dv.formula1 or "").strip()
+        if not formula:
+            return []
+        if formula.startswith('"') and formula.endswith('"'):
+            content = formula[1:-1]
+            parts = [p.replace('""', '"').strip() for p in content.split(",")]
+            return [p for p in parts if p]
+        if formula.startswith("="):
+            target = formula[1:]
+            sheet_name = ws.title
+            if "!" in target:
+                sheet_part, range_part = target.split("!", 1)
+                sheet_name = sheet_part.strip()
+                if sheet_name.startswith("'") and sheet_name.endswith("'"):
+                    sheet_name = sheet_name[1:-1].replace("''", "'")
+            else:
+                range_part = target
+            range_part = range_part.strip()
+            try:
+                target_ws = wb[sheet_name]
+            except KeyError:
+                return []
+            values: List[str] = []
+            for row in target_ws[range_part]:
+                cells = row if isinstance(row, (list, tuple)) else (row,)
+                for cell in cells:
+                    if cell.value is None:
+                        continue
+                    text = str(cell.value).strip()
+                    if not text:
+                        continue
+                    if text not in values:
+                        values.append(text)
+            return values
+        return []
+
+    def _to_excel_value(self, col_name: str, value: Any):
+        if value is None or value is pd.NA:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+
+        if isinstance(value, pd.Timestamp):
+            return value.to_pydatetime()
+        if isinstance(value, dt.datetime):
+            return value
+        if isinstance(value, dt.date):
+            return value
+
+        if col_name == "No":
+            try:
+                return int(value)
+            except Exception:
+                return value
+
+        if col_name == "期限":
+            if isinstance(value, str):
+                parsed = _from_iso_date_str(value)
+                return None if parsed is pd.NaT else parsed
+
+        if isinstance(value, str):
+            text = value.strip()
+            return text if text else None
+
+        return value
+
+    def _build_validation_formula(self, values: List[str]) -> str:
+        escaped = [v.replace('"', '""') for v in values]
+        return '"' + ",".join(escaped) + '"'
 
     def _ensure_unique_no(self, no_value: int):
         known = set(
@@ -142,6 +266,38 @@ class TaskStore:
     def get_statuses(self) -> List[str]:
         with self._lock:
             return list(self._statuses)
+
+    def get_validations(self) -> Dict[str, List[str]]:
+        with self._lock:
+            return {k: list(v) for k, v in self._validations.items()}
+
+    def set_validations(self, mapping: Dict[str, List[Any]]):
+        with self._lock:
+            cleaned: Dict[str, List[str]] = {}
+            for col in REQUIRED_COLUMNS:
+                if col == "No":
+                    continue
+                raw_values = mapping.get(col)
+                if not raw_values:
+                    continue
+                values: List[str] = []
+                for value in raw_values:
+                    text = str(value or "").strip()
+                    if text and text not in values:
+                        values.append(text)
+                if values:
+                    cleaned[col] = values
+            self._validations = cleaned
+            if cleaned.get("ステータス"):
+                base = list(cleaned["ステータス"])
+                extras = [
+                    s
+                    for s in self._df["ステータス"].dropna().astype(str).tolist()
+                    if s and s not in base
+                ]
+                self._statuses = base + extras
+            else:
+                self._rebuild_statuses_from_df()
 
     def _format_row(self, row: pd.Series) -> Dict[str, Any]:
         return {
@@ -237,7 +393,47 @@ class TaskStore:
 
             df = self._df.copy()
             try:
-                df.to_excel(tmp_path, index=False, engine="openpyxl")
+                if self.excel_path.exists():
+                    wb = load_workbook(self.excel_path)
+                else:
+                    wb = Workbook()
+                if not self._sheet_name:
+                    self._sheet_name = wb.sheetnames[0]
+                if self._sheet_name not in wb.sheetnames:
+                    ws = wb.create_sheet(title=self._sheet_name)
+                else:
+                    ws = wb[self._sheet_name]
+
+                ws.delete_rows(1, ws.max_row)
+                ws.append(REQUIRED_COLUMNS)
+                for row in df.itertuples(index=False, name=None):
+                    values: List[Any] = []
+                    for col_name, value in zip(REQUIRED_COLUMNS, row):
+                        values.append(self._to_excel_value(col_name, value))
+                    ws.append(values)
+
+                if ws.data_validations is not None:
+                    ws.data_validations.dataValidation = []
+
+                for col_name, values in self._validations.items():
+                    if col_name not in REQUIRED_COLUMNS or not values:
+                        continue
+                    try:
+                        idx = REQUIRED_COLUMNS.index(col_name) + 1
+                    except ValueError:
+                        continue
+                    col_letter = get_column_letter(idx)
+                    formula = self._build_validation_formula(values)
+                    dv = DataValidation(
+                        type="list",
+                        formula1=formula,
+                        allow_blank=True,
+                        showDropDown=True,
+                    )
+                    dv.add(f"${col_letter}$2:${col_letter}$1048576")
+                    ws.add_data_validation(dv)
+
+                wb.save(tmp_path)
                 if self.excel_path.exists():
                     shutil.copy2(self.excel_path, backup_path)
                 os.replace(tmp_path, self.excel_path)
@@ -256,10 +452,22 @@ class JsApi:
         self.store = store
 
     def get_tasks(self) -> List[Dict[str, Any]]:
-        return self.store.get_tasks()
+            return self.store.get_tasks()
 
     def get_statuses(self) -> List[str]:
         return self.store.get_statuses()
+
+    def get_validations(self) -> Dict[str, List[str]]:
+        return self.store.get_validations()
+
+    def update_validations(self, payload: Any) -> Dict[str, Any]:
+        data = json.loads(payload) if isinstance(payload, str) else payload
+        self.store.set_validations(data or {})
+        return {
+            "ok": True,
+            "validations": self.store.get_validations(),
+            "statuses": self.store.get_statuses(),
+        }
 
     def add_task(self, payload: Any) -> Dict[str, Any]:
         data = json.loads(payload) if isinstance(payload, str) else payload
@@ -284,6 +492,7 @@ class JsApi:
             "ok": True,
             "tasks": self.store.get_tasks(),
             "statuses": self.store.get_statuses(),
+            "validations": self.store.get_validations(),
         }
 
 

@@ -389,6 +389,13 @@
       padding: 16px;
     }
 
+    .modal-card.validation-card {
+      width: min(720px, calc(100% - 24px));
+      max-height: calc(100% - 32px);
+      display: flex;
+      flex-direction: column;
+    }
+
     .modal-header {
       display: flex;
       justify-content: space-between;
@@ -440,6 +447,32 @@
       margin-top: 10px;
     }
 
+    .validation-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+      overflow-y: auto;
+      padding-right: 4px;
+      max-height: 360px;
+    }
+
+    .validation-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .validation-item textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    .validation-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     .danger {
       color: #ffd6d6;
     }
@@ -464,6 +497,7 @@
     </div>
     <button id="btn-add" class="btn btn-primary">＋ 追加</button>
     <button id="btn-save" class="btn btn-success">保存</button>
+    <button id="btn-validations" class="btn">入力規則</button>
     <button id="btn-reload" class="btn">再読込</button>
     <button id="btn-timeline" class="btn">タイムライン</button>
     <span class="hint">ドラッグ＆ドロップで列に移動できます</span>
@@ -512,6 +546,25 @@
 
   <div id="board" class="board" aria-live="polite"></div>
   <div class="footer-hint">※ 期限は YYYY-MM-DD（例: 2025-10-25）</div>
+
+  <!-- 入力規則モーダル -->
+  <div id="validation-modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card validation-card">
+      <div class="modal-header">
+        <div class="modal-title">入力規則の設定</div>
+        <button id="btn-validation-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div>
+        <p class="validation-note">1 行に 1 候補を入力してください。空行は無視されます。</p>
+        <div id="validation-editor" class="validation-editor" role="region" aria-live="polite"></div>
+      </div>
+      <div class="modal-actions">
+        <span style="flex:1"></span>
+        <button id="btn-validation-cancel" class="btn">キャンセル</button>
+        <button id="btn-validation-save" class="btn btn-success">適用</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 編集モーダル -->
   <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
@@ -589,6 +642,9 @@
     });
 
     /* ===================== 状態 ===================== */
+    const REQUIRED_COLUMNS = ["No", "ステータス", "タスク", "担当者", "優先度", "期限", "備考"];
+    const VALIDATION_COLUMNS = REQUIRED_COLUMNS.filter(col => col !== 'No');
+    const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
     let STATUSES = [];
     let FILTERS = {
       assignee: '__ALL__',
@@ -598,28 +654,119 @@
     };
     let TASKS = [];
     let CURRENT_EDIT = null;
+    let VALIDATIONS = {};
+
+    function normalizeValidationValues(rawList) {
+      if (!Array.isArray(rawList)) return [];
+      const seen = new Set();
+      const values = [];
+      rawList.forEach(v => {
+        const text = String(v ?? '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        values.push(text);
+      });
+      return values;
+    }
+
+    function applyValidationState(raw) {
+      const next = {};
+      if (raw && typeof raw === 'object') {
+        Object.keys(raw).forEach(key => {
+          const values = normalizeValidationValues(raw[key]);
+          if (values.length > 0) {
+            next[key] = values;
+          }
+        });
+      }
+      VALIDATIONS = next;
+
+      const validatedStatuses = next['ステータス'] || [];
+      if (validatedStatuses.length > 0) {
+        const extras = Array.isArray(STATUSES) ? STATUSES.filter(s => !validatedStatuses.includes(s)) : [];
+        STATUSES = [...validatedStatuses, ...extras];
+      }
+
+      if (!Array.isArray(STATUSES) || STATUSES.length === 0) {
+        STATUSES = [...DEFAULT_STATUSES];
+      }
+
+      const seen = new Set();
+      const ordered = [];
+      STATUSES.forEach(s => {
+        const text = String(s ?? '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        ordered.push(text);
+      });
+
+      if (Array.isArray(TASKS)) {
+        TASKS.forEach(t => {
+          const name = String(t?.ステータス ?? '').trim();
+          if (!name || seen.has(name)) return;
+          seen.add(name);
+          ordered.push(name);
+        });
+      }
+
+      if (ordered.length === 0) {
+        DEFAULT_STATUSES.forEach(s => {
+          if (!seen.has(s)) {
+            ordered.push(s);
+            seen.add(s);
+          }
+        });
+      }
+
+      STATUSES = ordered;
+    }
+
+    function syncFilterStatuses(prevSelection) {
+      const statuses = Array.isArray(STATUSES) ? STATUSES : [];
+      const base = prevSelection instanceof Set ? prevSelection : new Set();
+      const next = new Set();
+      statuses.forEach(s => {
+        if (base.has(s)) next.add(s);
+      });
+      if (next.size === 0) {
+        statuses.forEach(s => next.add(s));
+      }
+      FILTERS.statuses = next;
+    }
 
     /* ===================== 初期化 ===================== */
     async function init(force = false) {
+      const prevSelection = new Set(FILTERS.statuses);
+      let validationPayload = VALIDATIONS;
       if (force) {
         if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
           try {
             const r = await api.reload_from_excel();
             if (r?.tasks) TASKS = r.tasks;
             if (r?.statuses) STATUSES = r.statuses;
+            validationPayload = r?.validations ?? VALIDATIONS;
           } catch (e) {
             console.warn('reload_from_excel failed, fallback to get_*', e);
             STATUSES = await api.get_statuses();
             TASKS = await api.get_tasks();
+            if (typeof api.get_validations === 'function') {
+              validationPayload = await api.get_validations();
+            } else {
+              validationPayload = VALIDATIONS;
+            }
           }
         } else {
           STATUSES = await api.get_statuses();
           TASKS = await api.get_tasks();
+          if (typeof api.get_validations === 'function') {
+            validationPayload = await api.get_validations();
+          } else {
+            validationPayload = VALIDATIONS;
+          }
         }
       }
-      if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
-        STATUSES.forEach(s => FILTERS.statuses.add(s));
-      }
+      applyValidationState(validationPayload);
+      syncFilterStatuses(prevSelection);
       renderBoard();
       buildFiltersUI();   // 初回＆再読込時にフィルタUIを最新へ
       if (!WIRED) { wireToolbar(); WIRED = true; }
@@ -940,14 +1087,21 @@
           alert('保存に失敗: ' + (e?.message || e));
         }
       });
+      document.getElementById('btn-validations').addEventListener('click', () => openValidationModal());
       document.getElementById('btn-reload').addEventListener('click', async () => {
         try {
           const r = await api.reload_from_excel();
           if (r?.tasks) TASKS = r.tasks;
           if (r?.statuses) STATUSES = r.statuses;
-          if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
-            STATUSES.forEach(s => FILTERS.statuses.add(s));
+          let validationPayload = VALIDATIONS;
+          if (r?.validations) {
+            validationPayload = r.validations;
+          } else if (typeof api.get_validations === 'function') {
+            validationPayload = await api.get_validations();
           }
+          const prevSelection = new Set(FILTERS.statuses);
+          applyValidationState(validationPayload);
+          syncFilterStatuses(prevSelection);
           renderBoard();
           buildFiltersUI();
         } catch (e) {
@@ -957,6 +1111,86 @@
       document.getElementById('btn-timeline').addEventListener('click', () => {
         window.location.href = 'timeline.html';
       });
+    }
+
+    /* ===================== 入力規則モーダル ===================== */
+    function openValidationModal() {
+      const modal = document.getElementById('validation-modal');
+      const editor = document.getElementById('validation-editor');
+      if (!modal || !editor) return;
+
+      editor.innerHTML = '';
+      VALIDATION_COLUMNS.forEach(column => {
+        const item = document.createElement('div');
+        item.className = 'validation-item';
+
+        const label = document.createElement('label');
+        const id = 'val-' + btoa(unescape(encodeURIComponent(column))).replace(/=/g, '');
+        label.setAttribute('for', id);
+        label.textContent = column;
+
+        const textarea = document.createElement('textarea');
+        textarea.id = id;
+        textarea.dataset.column = column;
+        textarea.placeholder = '1 行に 1 候補を入力';
+        textarea.value = (Array.isArray(VALIDATIONS[column]) ? VALIDATIONS[column] : []).join('\n');
+        textarea.spellcheck = false;
+
+        item.appendChild(label);
+        item.appendChild(textarea);
+        editor.appendChild(item);
+      });
+
+      const closeBtn = document.getElementById('btn-validation-close');
+      const cancelBtn = document.getElementById('btn-validation-cancel');
+      const saveBtn = document.getElementById('btn-validation-save');
+
+      if (closeBtn) closeBtn.onclick = closeValidationModal;
+      if (cancelBtn) cancelBtn.onclick = closeValidationModal;
+      modal.onclick = (ev) => {
+        if (ev.target === modal) closeValidationModal();
+      };
+
+      if (saveBtn) {
+        saveBtn.onclick = async () => {
+          const payload = {};
+          editor.querySelectorAll('textarea[data-column]').forEach(area => {
+            const col = area.dataset.column;
+            const lines = area.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+            payload[col] = lines;
+          });
+
+          try {
+            const prevSelection = new Set(FILTERS.statuses);
+            if (typeof api?.update_validations === 'function') {
+              const res = await api.update_validations(payload);
+              if (res?.statuses && Array.isArray(res.statuses)) {
+                STATUSES = res.statuses;
+              }
+              const received = res?.validations ?? payload;
+              applyValidationState(received);
+            } else {
+              applyValidationState(payload);
+            }
+            syncFilterStatuses(prevSelection);
+            closeValidationModal();
+            renderBoard();
+            buildFiltersUI();
+          } catch (err) {
+            alert('入力規則の保存に失敗: ' + (err?.message || err));
+          }
+        };
+      }
+
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeValidationModal() {
+      const modal = document.getElementById('validation-modal');
+      if (!modal) return;
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
     }
 
     function parseISO(d) {
