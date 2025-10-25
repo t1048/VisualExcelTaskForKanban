@@ -212,6 +212,11 @@
       background: rgba(245, 158, 11, 0.12);
     }
 
+    .badge-priority {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.15);
+    }
+
     .card-meta {
       display: flex;
       gap: 6px;
@@ -430,6 +435,10 @@
           <select id="f-status"></select>
         </div>
         <div class="row">
+          <label for="f-priority">優先度</label>
+          <input type="text" id="f-priority" placeholder="例: 1, 高, 中 など" />
+        </div>
+        <div class="row">
           <label for="f-assignee">担当者</label>
           <input type="text" id="f-assignee" />
         </div>
@@ -559,7 +568,7 @@
         // ↓ 絞り込み済みから、その列のカードを描画
         FILTERED
           .filter(t => t.ステータス === status)
-          .sort((a, b) => (a.No || 0) - (b.No || 0))
+          .sort((a, b) => comparePriorityValues(a.優先度, b.優先度) || (a.No || 0) - (b.No || 0))
           .forEach(task => drop.appendChild(renderCard(task)));
 
         body.appendChild(drop);
@@ -653,6 +662,39 @@
     }
 
 
+    const PRIORITY_LABEL_ORDER = new Map([
+      ['最優先', 0],
+      ['緊急', 0],
+      ['高', 1],
+      ['High', 1],
+      ['中', 2],
+      ['Medium', 2],
+      ['低', 3],
+      ['Low', 3],
+      ['通常', 4],
+      ['Normal', 4],
+      ['後回し', 5],
+      ['Low Priority', 5],
+    ]);
+
+    function prioritySortKey(value) {
+      if (value === null || value === undefined) return { weight: 1001, label: '' };
+      if (typeof value === 'number' && !Number.isNaN(value)) return { weight: value, label: '' };
+      const str = String(value).trim();
+      if (!str) return { weight: 1001, label: '' };
+      const num = Number(str);
+      if (!Number.isNaN(num)) return { weight: num, label: '' };
+      if (PRIORITY_LABEL_ORDER.has(str)) return { weight: PRIORITY_LABEL_ORDER.get(str), label: '' };
+      return { weight: 1000, label: str };
+    }
+
+    function comparePriorityValues(a, b) {
+      const ka = prioritySortKey(a);
+      const kb = prioritySortKey(b);
+      if (ka.weight !== kb.weight) return ka.weight - kb.weight;
+      return ka.label.localeCompare(kb.label, 'ja');
+    }
+
     function renderCard(task) {
       const el = document.createElement('article');
       el.className = 'card';
@@ -679,6 +721,12 @@
 
       const meta = document.createElement('div');
       meta.className = 'card-meta';
+      if (task.優先度 !== undefined && task.優先度 !== null && String(task.優先度).trim() !== '') {
+        const bp = document.createElement('span');
+        bp.className = 'badge badge-priority';
+        bp.textContent = `優先度: ${task.優先度}`;
+        meta.appendChild(bp);
+      }
       if (task.担当者) {
         const b1 = document.createElement('span'); b1.className = 'badge badge-assignee'; b1.textContent = task.担当者; meta.appendChild(b1);
       }
@@ -803,6 +851,7 @@
         ステータス: STATUSES[0] || '未着手',
         タスク: '',
         担当者: '',
+        優先度: '',
         期限: '',
         備考: ''
       }, { mode: 'create' });
@@ -821,6 +870,7 @@
       const fstat = document.getElementById('f-status');
       const fttl = document.getElementById('f-title');
       const fwho = document.getElementById('f-assignee');
+      const fprio = document.getElementById('f-priority');
       const fdue = document.getElementById('f-due');
       const fnote = document.getElementById('f-notes');
       const btnDelete = document.getElementById('btn-delete');
@@ -839,6 +889,7 @@
       fstat.value = task.ステータス || STATUSES[0] || '未着手';
       fttl.value = task.タスク || '';
       fwho.value = task.担当者 || '';
+      fprio.value = task.優先度 !== undefined && task.優先度 !== null ? String(task.優先度) : '';
       fdue.value = (task.期限 || '').slice(0, 10);
       fnote.value = task.備考 || '';
 
@@ -870,6 +921,7 @@
           ステータス: fstat.value.trim(),
           タスク: fttl.value.trim(),
           担当者: fwho.value.trim(),
+          優先度: fprio.value.trim(),
           期限: fdue.value ? fdue.value : '',
           備考: fnote.value
         };

@@ -14,7 +14,15 @@ import pandas as pd
 import webview
 
 
-REQUIRED_COLUMNS = ["No", "ステータス", "タスク", "担当者", "期限", "備考"]
+REQUIRED_COLUMNS = [
+    "No",
+    "ステータス",
+    "タスク",
+    "担当者",
+    "優先度",
+    "期限",
+    "備考",
+]
 DEFAULT_STATUSES = ["未着手", "進行中", "完了", "保留"]
 
 
@@ -37,6 +45,42 @@ def _from_iso_date_str(value: str):
         return pd.to_datetime(value).date()
     except Exception:
         return pd.NaT
+
+
+def _normalize_priority(value: Any):
+    if value is None or value is pd.NA:
+        return pd.NA
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return pd.NA
+        value = trimmed
+
+    if pd.isna(value):
+        return pd.NA
+
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if pd.isna(num):
+        return pd.NA
+
+    if float(num).is_integer():
+        return int(num)
+    return float(num)
+
+
+def _format_priority(value: Any):
+    if pd.isna(value):
+        return ""
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        if isinstance(value, float) and float(value).is_integer():
+            return int(value)
+        return value
+    return str(value)
 
 
 class TaskStore:
@@ -105,6 +149,7 @@ class TaskStore:
             "ステータス": "" if pd.isna(row["ステータス"]) else str(row["ステータス"]),
             "タスク": "" if pd.isna(row["タスク"]) else str(row["タスク"]),
             "担当者": "" if pd.isna(row["担当者"]) else str(row["担当者"]),
+            "優先度": _format_priority(row["優先度"]),
             "期限": _to_iso_date_str(row["期限"]),
             "備考": "" if pd.isna(row["備考"]) else str(row["備考"]),
         }
@@ -129,12 +174,14 @@ class TaskStore:
             assignee = str(task.get("担当者", "") or "").strip()
             notes = str(task.get("備考", "") or "")
             due = _from_iso_date_str(task.get("期限", ""))
+            priority = _normalize_priority(task.get("優先度"))
 
             row = {
                 "No": int(no_value),
                 "ステータス": status,
                 "タスク": title,
                 "担当者": assignee,
+                "優先度": priority,
                 "期限": due,
                 "備考": notes,
             }
@@ -158,6 +205,8 @@ class TaskStore:
                 self._df.at[i, "タスク"] = str(patch["タスク"] or "").strip()
             if "担当者" in patch:
                 self._df.at[i, "担当者"] = str(patch["担当者"] or "").strip()
+            if "優先度" in patch:
+                self._df.at[i, "優先度"] = _normalize_priority(patch["優先度"])
             if "期限" in patch:
                 self._df.at[i, "期限"] = _from_iso_date_str(patch["期限"])
             if "備考" in patch:
