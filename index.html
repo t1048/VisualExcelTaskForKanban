@@ -210,6 +210,85 @@
     .badge-date {
       color: #fde68a;
       background: rgba(245, 158, 11, 0.12);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card.due-warning {
+      border-color: rgba(245, 158, 11, 0.6);
+      box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35), var(--shadow);
+    }
+
+    .card.due-overdue {
+      border-color: rgba(239, 68, 68, 0.7);
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.4), var(--shadow);
+    }
+
+    .badge-date.due-warning {
+      color: #fef3c7;
+      background: rgba(245, 158, 11, 0.2);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+
+    .badge-date.due-overdue {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .toolbar-due {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-start;
+      margin-right: 8px;
+    }
+
+    .toolbar-due.active {
+      display: flex;
+    }
+
+    .toolbar-due-badges {
+      display: flex;
+      gap: 6px;
+    }
+
+    .due-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .due-indicator .count {
+      font-weight: 600;
+    }
+
+    .due-indicator.due-overdue {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    .due-indicator.due-warning {
+      color: #fef3c7;
+      background: rgba(245, 158, 11, 0.18);
+      border-color: rgba(245, 158, 11, 0.38);
+    }
+
+    .due-toast {
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(15, 23, 42, 0.75);
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: var(--shadow);
     }
 
     .card-meta {
@@ -370,6 +449,13 @@
 <body>
   <div class="toolbar">
     <div class="title">タスク・カンバン</div>
+    <div class="toolbar-due" id="toolbar-due" aria-live="polite">
+      <div class="toolbar-due-badges">
+        <span id="due-overdue-count" class="due-indicator due-overdue" hidden>期限超過 <span class="count">0</span></span>
+        <span id="due-warning-count" class="due-indicator due-warning" hidden>期限間近 <span class="count">0</span></span>
+      </div>
+      <div id="due-toast" class="due-toast" hidden></div>
+    </div>
     <button id="btn-add" class="btn btn-primary">＋ 追加</button>
     <button id="btn-save" class="btn btn-success">保存</button>
     <button id="btn-reload" class="btn">再読込</button>
@@ -567,6 +653,8 @@
         col.appendChild(body);
         board.appendChild(col);
       });
+
+      updateDueIndicators(FILTERED);
     }
 
 
@@ -659,6 +747,13 @@
       el.draggable = true;
       el.dataset.no = task.No;
 
+      const dueState = getDueState(task);
+      if (dueState?.level === 'overdue') {
+        el.classList.add('due-overdue');
+      } else if (dueState?.level === 'warning') {
+        el.classList.add('due-warning');
+      }
+
       el.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', String(task.No));
         e.dataTransfer.dropEffect = 'move';
@@ -683,7 +778,16 @@
         const b1 = document.createElement('span'); b1.className = 'badge badge-assignee'; b1.textContent = task.担当者; meta.appendChild(b1);
       }
       if (task.期限) {
-        const b2 = document.createElement('span'); b2.className = 'badge badge-date'; b2.textContent = task.期限; meta.appendChild(b2);
+        const b2 = document.createElement('span');
+        b2.className = 'badge badge-date';
+        let dueText = task.期限;
+        if (dueState) {
+          dueText += `（${dueState.label}）`;
+          if (dueState.level === 'overdue') b2.classList.add('due-overdue');
+          if (dueState.level === 'warning') b2.classList.add('due-warning');
+        }
+        b2.textContent = dueText;
+        meta.appendChild(b2);
       }
 
       const notes = document.createElement('div');
@@ -694,6 +798,55 @@
       el.appendChild(meta);
       el.appendChild(notes);
       return el;
+    }
+
+    function updateDueIndicators(tasks) {
+      const container = document.getElementById('toolbar-due');
+      const overdueEl = document.getElementById('due-overdue-count');
+      const warningEl = document.getElementById('due-warning-count');
+      const toastEl = document.getElementById('due-toast');
+      if (!container || !overdueEl || !warningEl || !toastEl) return;
+
+      let overdue = 0;
+      let warning = 0;
+
+      tasks.forEach(task => {
+        const state = getDueState(task);
+        if (!state) return;
+        if (state.level === 'overdue') {
+          overdue += 1;
+        } else if (state.level === 'warning') {
+          warning += 1;
+        }
+      });
+
+      if (overdue > 0) {
+        overdueEl.hidden = false;
+        overdueEl.querySelector('.count').textContent = overdue;
+      } else {
+        overdueEl.hidden = true;
+      }
+
+      if (warning > 0) {
+        warningEl.hidden = false;
+        warningEl.querySelector('.count').textContent = warning;
+      } else {
+        warningEl.hidden = true;
+      }
+
+      if (overdue > 0) {
+        toastEl.hidden = false;
+        toastEl.textContent = `⚠️ 期限を過ぎたカードが ${overdue} 件あります。`;
+      } else if (warning > 0) {
+        toastEl.hidden = false;
+        toastEl.textContent = `⏰ 期限が近いカードが ${warning} 件あります。`;
+      } else {
+        toastEl.hidden = true;
+        toastEl.textContent = '';
+      }
+
+      const hasAlerts = overdue > 0 || warning > 0;
+      container.classList.toggle('active', hasAlerts);
     }
 
     /* ===================== DnD ===================== */
@@ -750,6 +903,49 @@
       if (!m) return null;
       const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
       return isNaN(dt.getTime()) ? null : dt;
+    }
+
+    function getDueState(task) {
+      const dueDate = parseISO(task?.期限 || '');
+      if (!dueDate) return null;
+
+      const due = new Date(dueDate.getTime());
+      due.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((due.getTime() - today.getTime()) / 86400000);
+
+      if (diffDays < 0) {
+        const abs = Math.abs(diffDays);
+        return {
+          level: 'overdue',
+          diff: abs,
+          label: `${abs}日超過`
+        };
+      }
+
+      if (diffDays === 0) {
+        return {
+          level: 'warning',
+          diff: 0,
+          label: '本日期限'
+        };
+      }
+
+      const label = `あと${diffDays}日`;
+      if (diffDays <= 3) {
+        return {
+          level: 'warning',
+          diff: diffDays,
+          label
+        };
+      }
+
+      return {
+        level: 'normal',
+        diff: diffDays,
+        label
+      };
     }
 
     function getFilteredTasks() {
