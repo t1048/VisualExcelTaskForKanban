@@ -373,6 +373,7 @@
     <button id="btn-add" class="btn btn-primary">＋ 追加</button>
     <button id="btn-save" class="btn btn-success">保存</button>
     <button id="btn-reload" class="btn">再読込</button>
+    <button id="btn-timeline" class="btn">タイムライン</button>
     <span class="hint">ドラッグ＆ドロップで列に移動できます</span>
   </div>
 
@@ -513,6 +514,9 @@
           STATUSES = await api.get_statuses();
           TASKS = await api.get_tasks();
         }
+      }
+      if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
+        STATUSES.forEach(s => FILTERS.statuses.add(s));
       }
       renderBoard();
       buildFiltersUI();   // 初回＆再読込時にフィルタUIを最新へ
@@ -725,11 +729,17 @@
           const r = await api.reload_from_excel();
           if (r?.tasks) TASKS = r.tasks;
           if (r?.statuses) STATUSES = r.statuses;
+          if (FILTERS.statuses.size === 0 && Array.isArray(STATUSES)) {
+            STATUSES.forEach(s => FILTERS.statuses.add(s));
+          }
           renderBoard();
           buildFiltersUI();
         } catch (e) {
           alert('再読込に失敗: ' + (e?.message || e));
         }
+      });
+      document.getElementById('btn-timeline').addEventListener('click', () => {
+        window.location.href = 'timeline.html';
       });
     }
 
