@@ -87,23 +87,40 @@ def _format_priority(value: Any):
 
 
 class TaskStore:
-    def __init__(self, excel_path: Path):
+    def __init__(self, excel_path: Path, sheet_name: str | None = None):
         self.excel_path = excel_path
         self._lock = threading.RLock()
         self._df = pd.DataFrame(columns=REQUIRED_COLUMNS)
         self._statuses: List[str] = list(DEFAULT_STATUSES)
-        self._sheet_name: str | None = None
+        self._requested_sheet_name: str | None = (
+            sheet_name.strip() if isinstance(sheet_name, str) and sheet_name.strip() else None
+        )
+        self._sheet_name: str | None = self._requested_sheet_name
         self._validations: Dict[str, List[str]] = {}
         self.load_excel()
 
     def load_excel(self):
         with self._lock:
+            requested_sheet = self._requested_sheet_name
             if not self.excel_path.exists():
                 df = pd.DataFrame(columns=REQUIRED_COLUMNS)
-                df.to_excel(self.excel_path, index=False)
+                df.to_excel(
+                    self.excel_path,
+                    index=False,
+                    sheet_name=requested_sheet or "Sheet1",
+                )
 
             wb = load_workbook(self.excel_path, data_only=False)
-            sheet_name = wb.sheetnames[0]
+            if requested_sheet:
+                if requested_sheet in wb.sheetnames:
+                    sheet_name = requested_sheet
+                else:
+                    ws = wb.create_sheet(title=requested_sheet)
+                    ws.append(REQUIRED_COLUMNS)
+                    wb.save(self.excel_path)
+                    sheet_name = requested_sheet
+            else:
+                sheet_name = wb.sheetnames[0]
             ws = wb[sheet_name]
             self._sheet_name = sheet_name
             self._validations = self._extract_validations(wb, ws)
@@ -504,6 +521,11 @@ def main():
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--sheet",
+        default=None,
+        help="Excel ファイルから読み込むシート名 (未指定時は先頭のシート)",
+    )
     args = parser.parse_args()
 
     excel_path = Path(args.excel).expanduser().resolve()
@@ -511,7 +533,7 @@ def main():
     if not html_path.exists():
         raise FileNotFoundError(f"HTML が見つかりません: {html_path}")
 
-    store = TaskStore(excel_path)
+    store = TaskStore(excel_path, sheet_name=args.sheet)
     api = JsApi(store)
 
     window = webview.create_window(
