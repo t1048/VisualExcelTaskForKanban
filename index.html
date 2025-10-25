@@ -332,7 +332,8 @@
     }
 
     .filter select,
-    .filter input[type="date"] {
+    .filter input[type="date"],
+    .filter input[type="text"] {
       background: #0a1020;
       color: var(--text);
       border: 1px solid rgba(255, 255, 255, 0.12);
@@ -483,6 +484,11 @@
       <div class="status-checks" id="flt-statuses"></div>
     </div>
 
+    <div class="filter" style="min-width:260px;flex:1;">
+      <label for="flt-keyword">キーワード</label>
+      <input type="text" id="flt-keyword" placeholder="タスク・備考を検索" />
+    </div>
+
     <div class="filter" style="min-width:320px;">
       <label>期限</label>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -587,6 +593,7 @@
     let FILTERS = {
       assignee: '__ALL__',
       statuses: new Set(),              // 初期化時に全ONにする
+      keyword: '',
       date: { mode: 'none', from: '', to: '' }
     };
     let TASKS = [];
@@ -704,6 +711,14 @@
       sel.value = list.includes(selected) ? selected : '__ALL__';
       sel.onchange = () => { FILTERS.assignee = sel.value; renderBoard(); };
 
+      // キーワード
+      const keywordEl = document.getElementById('flt-keyword');
+      keywordEl.value = FILTERS.keyword || '';
+      keywordEl.oninput = () => {
+        FILTERS.keyword = keywordEl.value;
+        renderBoard();
+      };
+
       // 期限（モード＆日付）
       const modeSel = document.getElementById('flt-date-mode');
       const fromEl = document.getElementById('flt-date-from');
@@ -743,7 +758,7 @@
 
       // 解除ボタン
       document.getElementById('btn-clear-filters').onclick = () => {
-        FILTERS = { assignee: '__ALL__', statuses: new Set(STATUSES), date: { mode: 'none', from: '', to: '' } };
+        FILTERS = { assignee: '__ALL__', statuses: new Set(STATUSES), keyword: '', date: { mode: 'none', from: '', to: '' } };
         buildFiltersUI();
         renderBoard();
       };
@@ -1000,6 +1015,7 @@
       const assignee = FILTERS.assignee;
       const statuses = FILTERS.statuses;
       const df = FILTERS.date;
+      const keyword = (FILTERS.keyword || '').trim().toLowerCase();
 
       return TASKS.filter(t => {
         // 担当者
@@ -1008,6 +1024,13 @@
         }
         // ステータス
         if (!statuses.has(t.ステータス)) return false;
+
+        // キーワード（タスク・備考）
+        if (keyword) {
+          const title = String(t.タスク ?? '').toLowerCase();
+          const note = String(t.備考 ?? '').toLowerCase();
+          if (!title.includes(keyword) && !note.includes(keyword)) return false;
+        }
 
         // 期限
         if (df.mode === 'none') return true;
