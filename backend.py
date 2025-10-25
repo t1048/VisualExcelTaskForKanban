@@ -7,7 +7,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 import datetime as dt
 
 import pandas as pd
@@ -138,6 +138,8 @@ class TaskStore:
 
             df = df[REQUIRED_COLUMNS].copy()
 
+            df["No"] = self._coerce_no_series(df.get("No"))
+
             if "期限" in df.columns:
                 df["期限"] = pd.to_datetime(df["期限"], errors="coerce").dt.date
 
@@ -264,17 +266,30 @@ class TaskStore:
         escaped = [v.replace('"', '""') for v in values]
         return '"' + ",".join(escaped) + '"'
 
+    def _coerce_no_series(self, series: Iterable[Any] | None) -> pd.Series:
+        if series is None:
+            return pd.Series(dtype="Int64")
+        coerced = pd.to_numeric(series, errors="coerce")
+        index = getattr(series, "index", None)
+        return pd.Series(coerced, index=index, dtype="Int64")
+
     def _ensure_unique_no(self, no_value: int):
-        known = set(
-            self._df["No"].dropna().astype(int).tolist()
-        )
-        if int(no_value) in known:
+        series = self._coerce_no_series(self._df.get("No"))
+        if (series == int(no_value)).any():
             raise ValueError(f"No={no_value} は既に存在します。")
 
     def _next_no(self) -> int:
-        if self._df.empty or self._df["No"].dropna().empty:
+        series = self._coerce_no_series(self._df.get("No"))
+        if series.empty or series.dropna().empty:
             return 1
-        return int(self._df["No"].dropna().astype(int).max()) + 1
+        return int(series.dropna().astype(int).max()) + 1
+
+    def _find_index_by_no(self, no_value: int) -> pd.Index:
+        series = self._coerce_no_series(self._df.get("No"))
+        if series.empty:
+            return pd.Index([], dtype="int64")
+        mask = series == int(no_value)
+        return self._df.index[mask.fillna(False)]
 
     def get_tasks(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -359,13 +374,13 @@ class TaskStore:
                 "備考": notes,
             }
 
-            self._df = pd.concat([self._df, pd.DataFrame([row])], ignore_index=True)
+            self._df.loc[len(self._df)] = row
             self._ensure_status_registered(status)
             return self._format_row(self._df.iloc[-1])
 
     def update_task(self, no_value: int, patch: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
-            idx = self._df.index[self._df["No"].astype("Int64") == int(no_value)]
+            idx = self._find_index_by_no(int(no_value))
             if len(idx) == 0:
                 raise KeyError(f"No={no_value} は存在しません。")
 
@@ -392,7 +407,7 @@ class TaskStore:
 
     def delete_task(self, no_value: int) -> bool:
         with self._lock:
-            idx = self._df.index[self._df["No"].astype("Int64") == int(no_value)]
+            idx = self._find_index_by_no(int(no_value))
             if len(idx) == 0:
                 return False
             self._df = self._df.drop(index=idx).reset_index(drop=True)
@@ -469,7 +484,7 @@ class JsApi:
         self.store = store
 
     def get_tasks(self) -> List[Dict[str, Any]]:
-            return self.store.get_tasks()
+        return self.store.get_tasks()
 
     def get_statuses(self) -> List[str]:
         return self.store.get_statuses()

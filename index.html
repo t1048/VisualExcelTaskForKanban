@@ -615,6 +615,155 @@
     let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
     let WIRED = false;        // ツールバー多重バインド防止
 
+    function createMockApi() {
+      const baseStatuses = ['未着手', '進行中', '完了', '保留'];
+      const statusSet = new Set(baseStatuses);
+      const pad = n => String(n).padStart(2, '0');
+      const toISO = date => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+      const today = new Date();
+      const sampleTasks = Array.from({ length: 8 }).map((_, idx) => {
+        const due = new Date(today);
+        due.setDate(today.getDate() + idx - 2);
+        const status = baseStatuses[idx % baseStatuses.length];
+        statusSet.add(status);
+        return {
+          No: idx + 1,
+          ステータス: status,
+          タスク: `サンプルタスク ${idx + 1}`,
+          担当者: ['田中', '佐藤', '鈴木', '高橋'][idx % 4],
+          優先度: ['高', '中', '低'][idx % 3],
+          期限: toISO(due),
+          備考: idx % 2 === 0 ? 'モックデータ' : ''
+        };
+      });
+      const tasks = [...sampleTasks];
+      let validations = { 'ステータス': Array.from(statusSet) };
+
+      const cloneTask = task => ({ ...task });
+
+      const sanitizeStatus = status => {
+        const text = String(status ?? '').trim();
+        if (text) return text;
+        return baseStatuses[0];
+      };
+
+      const normalizeDue = value => {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return toISO(parsed);
+      };
+
+      const normalizePriority = value => {
+        if (value === null || value === undefined) return '';
+        const text = String(value).trim();
+        return text;
+      };
+
+      const normalizeTask = (payload, existingNo) => {
+        const assignedNo = (() => {
+          if (existingNo !== undefined && existingNo !== null) {
+            return Number(existingNo);
+          }
+          if (payload?.No !== undefined && payload.No !== null && payload.No !== '') {
+            return Number(payload.No) || allocateNo();
+          }
+          return allocateNo();
+        })();
+
+        const status = sanitizeStatus(payload?.ステータス);
+        statusSet.add(status);
+
+        return {
+          No: assignedNo,
+          ステータス: status,
+          タスク: String(payload?.タスク ?? '').trim(),
+          担当者: String(payload?.担当者 ?? '').trim(),
+          優先度: normalizePriority(payload?.優先度),
+          期限: normalizeDue(payload?.期限),
+          備考: String(payload?.備考 ?? '')
+        };
+      };
+
+      const allocateNo = () => {
+        const maxNo = tasks.reduce((acc, t) => Math.max(acc, Number(t?.No) || 0), 0);
+        return maxNo + 1;
+      };
+
+      const updateValidations = (payload) => {
+        if (!payload || typeof payload !== 'object') {
+          validations = { 'ステータス': Array.from(statusSet) };
+          return validations;
+        }
+        const cleaned = {};
+        Object.keys(payload).forEach(key => {
+          const raw = Array.isArray(payload[key]) ? payload[key] : [];
+          const seen = new Set();
+          const values = [];
+          raw.forEach(v => {
+            const text = String(v ?? '').trim();
+            if (!text || seen.has(text)) return;
+            seen.add(text);
+            values.push(text);
+          });
+          if (values.length > 0) cleaned[key] = values;
+        });
+        validations = cleaned;
+        if (Array.isArray(cleaned['ステータス'])) {
+          cleaned['ステータス'].forEach(v => statusSet.add(v));
+        }
+        return validations;
+      };
+
+      return {
+        async get_tasks() {
+          return tasks.map(cloneTask);
+        },
+        async get_statuses() {
+          return Array.from(statusSet);
+        },
+        async get_validations() {
+          return { ...validations };
+        },
+        async update_validations(payload) {
+          const updated = updateValidations(payload);
+          return { ok: true, validations: { ...updated }, statuses: Array.from(statusSet) };
+        },
+        async add_task(payload) {
+          const task = normalizeTask(payload, null);
+          tasks.push(task);
+          return cloneTask(task);
+        },
+        async update_task(no, payload) {
+          const target = tasks.find(t => Number(t.No) === Number(no));
+          if (!target) throw new Error('指定したタスクが見つかりません');
+          const updated = normalizeTask({ ...target, ...payload }, target.No);
+          Object.assign(target, updated);
+          return cloneTask(target);
+        },
+        async delete_task(no) {
+          const idx = tasks.findIndex(t => Number(t.No) === Number(no));
+          if (idx === -1) return false;
+          tasks.splice(idx, 1);
+          return true;
+        },
+        async move_task(no, status) {
+          return this.update_task(no, { ステータス: status });
+        },
+        async save_excel() {
+          return 'mock://task.xlsx';
+        },
+        async reload_from_excel() {
+          return {
+            ok: true,
+            tasks: tasks.map(cloneTask),
+            statuses: Array.from(statusSet),
+            validations: { ...validations }
+          };
+        }
+      };
+    }
+
 
     // DOM 準備
     function ready(fn) {
@@ -625,18 +774,25 @@
     // pywebview が利用可能になったタイミングで API を差し替えて強制再初期化
     window.addEventListener('pywebviewready', async () => {
       try {
-        api = window.pywebview.api;
-        RUN_MODE = 'pywebview';
-        console.log('[kanban] switched to pywebview API');
-        await init(true);  // Excelから取り直し
+        if (window.pywebview?.api) {
+          api = window.pywebview.api;
+          RUN_MODE = 'pywebview';
+          console.log('[kanban] switched to pywebview API');
+          await init(true);  // Excelから取り直し
+        }
       } catch (e) {
         console.error('pywebviewready error:', e);
       }
     });
 
     ready(async () => {
-      api = window.pywebview.api;
-      RUN_MODE = 'pywebview';
+      if (window.pywebview?.api) {
+        api = window.pywebview.api;
+        RUN_MODE = 'pywebview';
+      } else {
+        api = createMockApi();
+        RUN_MODE = 'mock';
+      }
       console.log('[kanban] run mode:', RUN_MODE);
       await init(true);
     });
