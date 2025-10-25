@@ -122,13 +122,20 @@
       letter-spacing: 0.04em;
     }
 
-    .controls input[type="date"] {
+    .controls input[type="date"],
+    .controls select {
       background: rgba(15, 23, 42, 0.9);
       border: 1px solid rgba(148, 163, 184, 0.4);
       border-radius: 10px;
       color: var(--text);
       padding: 7px 10px;
       min-height: 36px;
+      font-size: 13px;
+    }
+
+    .controls select {
+      appearance: none;
+      cursor: pointer;
     }
 
     .controls .quick {
@@ -359,6 +366,12 @@
           <label for="date-to">終了日</label>
           <input id="date-to" type="date" />
         </div>
+        <div class="field">
+          <label for="assignee-filter">担当者</label>
+          <select id="assignee-filter">
+            <option value="">すべて</option>
+          </select>
+        </div>
         <button id="btn-apply" class="btn btn-primary">表示を更新</button>
         <div class="quick">
           <button data-shift="-7">◀ 前週</button>
@@ -447,6 +460,7 @@
       ensureRangeDefaults();
       renderSummary();
       renderLegend();
+      renderAssigneeFilter();
       renderTimeline();
     }
 
@@ -481,6 +495,7 @@
     function wireControls() {
       document.getElementById('btn-apply').addEventListener('click', () => {
         renderSummary();
+        renderAssigneeFilter();
         renderTimeline();
       });
 
@@ -489,6 +504,7 @@
           const delta = Number(btn.dataset.shift || '0');
           shiftRange(delta);
           renderSummary();
+          renderAssigneeFilter();
           renderTimeline();
         });
       });
@@ -501,6 +517,12 @@
         end.setDate(start.getDate() + 6);
         setRange(start, end);
         renderSummary();
+        renderAssigneeFilter();
+        renderTimeline();
+      });
+
+      const assigneeSelect = document.getElementById('assignee-filter');
+      assigneeSelect.addEventListener('change', () => {
         renderTimeline();
       });
     }
@@ -538,6 +560,33 @@
       }).length;
       const withoutDue = TASKS.filter(t => !parseISO(t.期限)).length;
       summary.textContent = `表示期間: ${toLocale(from)} 〜 ${toLocale(to)} （${diff}日間） / 対象タスク ${inRange} 件、期限未設定 ${withoutDue} 件`;
+    }
+
+    function renderAssigneeFilter() {
+      const select = document.getElementById('assignee-filter');
+      if (!select) return;
+
+      const previous = select.value;
+      const assignees = collectAllAssignees();
+      select.innerHTML = '';
+
+      const optionAll = document.createElement('option');
+      optionAll.value = '';
+      optionAll.textContent = 'すべて';
+      select.appendChild(optionAll);
+
+      assignees.forEach(name => {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+
+      if (previous && assignees.includes(previous)) {
+        select.value = previous;
+      } else {
+        select.value = '';
+      }
     }
 
     function renderLegend() {
@@ -580,6 +629,7 @@
       const wrapper = document.getElementById('timeline-wrapper');
       const from = parseISO(document.getElementById('date-from').value);
       const to = parseISO(document.getElementById('date-to').value);
+      const assigneeFilter = document.getElementById('assignee-filter')?.value || '';
       if (!from || !to || from > to) {
         wrapper.innerHTML = '<div class="message">期間の指定が正しくありません。</div>';
         return;
@@ -592,8 +642,13 @@
       }
 
       const assignees = collectAssignees(from, to);
-      if (!assignees.length) {
-        wrapper.innerHTML = '<div class="message">表示できるタスクがありません。</div>';
+      const filteredAssignees = assigneeFilter ? assignees.filter(name => name === assigneeFilter) : assignees;
+      if (!filteredAssignees.length) {
+        if (assigneeFilter) {
+          wrapper.innerHTML = '<div class="message">選択した担当者のタスクが表示期間内にありません。</div>';
+        } else {
+          wrapper.innerHTML = '<div class="message">表示できるタスクがありません。</div>';
+        }
         return;
       }
 
@@ -624,9 +679,9 @@
       table.appendChild(thead);
 
       const tbody = document.createElement('tbody');
-      const taskMap = buildTaskLookup(from, to);
+      const taskMap = buildTaskLookup(from, to, assigneeFilter);
 
-      assignees.forEach(name => {
+      filteredAssignees.forEach(name => {
         const tr = document.createElement('tr');
         const th = document.createElement('th');
         th.textContent = name;
@@ -694,12 +749,13 @@
       return div;
     }
 
-    function buildTaskLookup(from, to) {
+    function buildTaskLookup(from, to, assigneeFilter = '') {
       const map = new Map();
       TASKS.forEach(task => {
         const due = parseISO(task.期限);
         if (!due || due < from || due > to) return;
         const assignee = task.担当者?.trim() || '（担当者未設定）';
+        if (assigneeFilter && assignee !== assigneeFilter) return;
         if (!map.has(assignee)) map.set(assignee, new Map());
         const byDate = map.get(assignee);
         const key = toISODate(due);
@@ -725,6 +781,14 @@
         const due = parseISO(task.期限);
         if (!due) return;
         if (!rangeFrom || !rangeTo || due < rangeFrom || due > rangeTo) return;
+        assignees.add(task.担当者?.trim() || '（担当者未設定）');
+      });
+      return Array.from(assignees).sort((a, b) => a.localeCompare(b, 'ja'));
+    }
+
+    function collectAllAssignees() {
+      const assignees = new Set();
+      TASKS.forEach(task => {
         assignees.add(task.担当者?.trim() || '（担当者未設定）');
       });
       return Array.from(assignees).sort((a, b) => a.localeCompare(b, 'ja'));
