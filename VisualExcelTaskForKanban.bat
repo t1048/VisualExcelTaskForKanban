@@ -1,0 +1,13 @@
+@echo off
+REM Fletアプリ起動用バッチファイル（Miniconda版）
+
+SETLOCAL
+
+REM Minicondaの flet 環境をアクティベート
+CALL "%USERPROFILE%\miniconda3\Scripts\activate.bat" py310
+
+REM Fletアプリの起動（main.pyを実行）
+python backend.py
+
+ENDLOCAL
+pause
