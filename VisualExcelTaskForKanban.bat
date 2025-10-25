@@ -1,13 +1,13 @@
 @echo off
-REM Fletã‚¢ãƒ—ãƒªèµ·å‹•ç”¨ãƒãƒƒãƒãƒ•ã‚¡ã‚¤ãƒ«ï¼ˆMinicondaç‰ˆï¼‰
+REM FletƒAƒvƒŠ‹N“®—pƒoƒbƒ`ƒtƒ@ƒCƒ‹iMiniconda”Åj
 
 SETLOCAL
 
-REM Minicondaã® flet ç’°å¢ƒã‚’ã‚¢ã‚¯ãƒ†ã‚£ãƒ™ãƒ¼ãƒˆ
+REM Miniconda‚Ì flet ŠÂ‹«‚ğƒAƒNƒeƒBƒx[ƒg
 CALL "%USERPROFILE%\miniconda3\Scripts\activate.bat" py310
 
-REM Fletã‚¢ãƒ—ãƒªã®èµ·å‹•ï¼ˆmain.pyã‚’å®Ÿè¡Œï¼‰
-python backend.py --excel "./task.xlsx"
+REM ƒAƒvƒŠ‚Ì‹N“®imain.py‚ğÀsj
+python backend.py --excel ./task.xlsx --sheet ƒ^ƒXƒN
 
 ENDLOCAL
 pause
