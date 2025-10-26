@@ -8,7 +8,7 @@ CALL "%USERPROFILE%\miniconda3\Scripts\activate.bat" py310
 
 REM リポジトリルートに移動してバックエンドを起動
 pushd "%~dp0.."
-python backend\backend.py --excel .\data\task.xlsx --sheet ^XN
+python backend\backend.py --excel .\data\task.xlsx --sheet ^タスク
 popd
 
 ENDLOCAL
