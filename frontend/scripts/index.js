@@ -192,6 +192,55 @@ let TASKS = [];
 let CURRENT_EDIT = null;
 let VALIDATIONS = {};
 
+function normalizeStatePayload(payload) {
+  if (!payload) return {};
+  if (typeof payload === 'string') {
+    try {
+      return JSON.parse(payload) || {};
+    } catch (err) {
+      console.warn('[kanban] failed to parse payload string', err);
+      return {};
+    }
+  }
+  if (typeof payload === 'object') return payload;
+  return {};
+}
+
+async function applyStateFromPayload(payload, options = {}) {
+  const { preserveFilters = true, fallbackToApi = true } = options;
+  const data = normalizeStatePayload(payload);
+  const prevSelection = preserveFilters ? new Set(FILTERS.statuses) : new Set();
+
+  if (Array.isArray(data.tasks)) {
+    TASKS = data.tasks;
+  }
+  if (Array.isArray(data.statuses)) {
+    STATUSES = data.statuses;
+  }
+
+  let validationPayload = data.validations ?? VALIDATIONS;
+  if (!data.validations && fallbackToApi && typeof api?.get_validations === 'function') {
+    try {
+      validationPayload = await api.get_validations();
+    } catch (err) {
+      console.warn('get_validations failed:', err);
+    }
+  }
+
+  applyValidationState(validationPayload);
+  syncFilterStatuses(prevSelection);
+  renderBoard();
+  buildFiltersUI();
+}
+
+window.__kanban_receive_update = (payload) => {
+  Promise.resolve(
+    applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false })
+  ).catch(err => {
+    console.error('[kanban] failed to apply pushed payload', err);
+  });
+};
+
 function normalizeValidationValues(rawList) {
   if (!Array.isArray(rawList)) return [];
   const seen = new Set();
@@ -272,39 +321,36 @@ function syncFilterStatuses(prevSelection) {
 
 /* ===================== 初期化 ===================== */
 async function init(force = false) {
-  const prevSelection = new Set(FILTERS.statuses);
-  let validationPayload = VALIDATIONS;
+  let payload = {};
   if (force) {
     if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
       try {
-        const r = await api.reload_from_excel();
-        if (r?.tasks) TASKS = r.tasks;
-        if (r?.statuses) STATUSES = r.statuses;
-        validationPayload = r?.validations ?? VALIDATIONS;
+        payload = normalizeStatePayload(await api.reload_from_excel());
       } catch (e) {
         console.warn('reload_from_excel failed, fallback to get_*', e);
-        STATUSES = await api.get_statuses();
-        TASKS = await api.get_tasks();
-        if (typeof api.get_validations === 'function') {
-          validationPayload = await api.get_validations();
-        } else {
-          validationPayload = VALIDATIONS;
-        }
+        payload = {};
       }
-    } else {
-      STATUSES = await api.get_statuses();
-      TASKS = await api.get_tasks();
-      if (typeof api.get_validations === 'function') {
-        validationPayload = await api.get_validations();
-      } else {
-        validationPayload = VALIDATIONS;
+    }
+
+    if (!Array.isArray(payload.tasks) && typeof api.get_tasks === 'function') {
+      try {
+        payload.tasks = await api.get_tasks();
+      } catch (err) {
+        console.error('get_tasks failed:', err);
+      }
+    }
+
+    if (!Array.isArray(payload.statuses) && typeof api.get_statuses === 'function') {
+      try {
+        payload.statuses = await api.get_statuses();
+      } catch (err) {
+        console.error('get_statuses failed:', err);
       }
     }
   }
-  applyValidationState(validationPayload);
-  syncFilterStatuses(prevSelection);
-  renderBoard();
-  buildFiltersUI();   // 初回＆再読込時にフィルタUIを最新へ
+
+  await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
+  // 初回＆再読込時にフィルタUIを最新へ
   if (!WIRED) { wireToolbar(); WIRED = true; }
 }
 
@@ -626,20 +672,8 @@ function wireToolbar() {
   document.getElementById('btn-validations').addEventListener('click', () => openValidationModal());
   document.getElementById('btn-reload').addEventListener('click', async () => {
     try {
-      const r = await api.reload_from_excel();
-      if (r?.tasks) TASKS = r.tasks;
-      if (r?.statuses) STATUSES = r.statuses;
-      let validationPayload = VALIDATIONS;
-      if (r?.validations) {
-        validationPayload = r.validations;
-      } else if (typeof api.get_validations === 'function') {
-        validationPayload = await api.get_validations();
-      }
-      const prevSelection = new Set(FILTERS.statuses);
-      applyValidationState(validationPayload);
-      syncFilterStatuses(prevSelection);
-      renderBoard();
-      buildFiltersUI();
+      const payload = await api.reload_from_excel();
+      await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
     } catch (e) {
       alert('再読込に失敗: ' + (e?.message || e));
     }

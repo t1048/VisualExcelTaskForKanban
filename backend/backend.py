@@ -7,7 +7,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 import datetime as dt
 
 import pandas as pd
@@ -15,6 +15,15 @@ import webview
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 from openpyxl.worksheet.datavalidation import DataValidation
+
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+    from watchdog.observers.polling import PollingObserver
+except ImportError:  # pragma: no cover - optional dependency guard
+    FileSystemEventHandler = object  # type: ignore
+    Observer = None  # type: ignore
+    PollingObserver = None  # type: ignore
 
 
 TASK_COLUMNS = [
@@ -96,6 +105,9 @@ class TaskStore:
         )
         self._sheet_name: str | None = self._requested_sheet_name
         self._validations: Dict[str, List[str]] = {}
+        self._last_saved_at: Optional[dt.datetime] = None
+        self._last_saved_mtime: Optional[float] = None
+        self._last_loaded_mtime: Optional[float] = None
         self.load_excel()
 
     def load_excel(self):
@@ -156,6 +168,19 @@ class TaskStore:
                 self._rebuild_statuses_from_df(df)
 
             self._df = df
+            self._last_loaded_mtime = self._get_file_mtime()
+            if self._last_saved_mtime is None:
+                self._last_saved_mtime = self._last_loaded_mtime
+
+    def _get_file_mtime(self) -> Optional[float]:
+        try:
+            return self.excel_path.stat().st_mtime
+        except FileNotFoundError:
+            return None
+
+    def get_last_saved_markers(self) -> Tuple[Optional[dt.datetime], Optional[float]]:
+        with self._lock:
+            return self._last_saved_at, self._last_saved_mtime
 
     def _rebuild_statuses_from_df(self, df: pd.DataFrame | None = None):
         if df is None:
@@ -438,6 +463,9 @@ class TaskStore:
                 if self.excel_path.exists():
                     shutil.copy2(self.excel_path, backup_path)
                 os.replace(tmp_path, self.excel_path)
+                self._last_saved_at = dt.datetime.now()
+                self._last_saved_mtime = self._get_file_mtime()
+                self._last_loaded_mtime = self._last_saved_mtime
             except Exception:
                 if tmp_path.exists():
                     try:
@@ -446,6 +474,134 @@ class TaskStore:
                         pass
                 raise
             return str(self.excel_path.resolve())
+
+
+def push_excel_update(window, store: TaskStore):
+    payload = {
+        "tasks": store.get_tasks(),
+        "statuses": store.get_statuses(),
+        "validations": store.get_validations(),
+    }
+    json_payload = json.dumps(payload, ensure_ascii=False)
+    script = (
+        "if (window.__kanban_receive_update) {"
+        f" window.__kanban_receive_update({json_payload});"
+        " }"
+    )
+    try:
+        window.evaluate_js(script)
+    except Exception as exc:  # pragma: no cover - depends on runtime
+        print(f"[kanban] Failed to push update to frontend: {exc}")
+
+
+class ExcelFileWatcher(FileSystemEventHandler):
+    def __init__(
+        self,
+        store: TaskStore,
+        window,
+        debounce_seconds: float = 2.0,
+    ):
+        super().__init__()
+        self.store = store
+        self.window = window
+        self.debounce_seconds = max(0.0, float(debounce_seconds))
+        try:
+            self._target_path = store.excel_path.resolve()
+        except Exception:
+            self._target_path = store.excel_path
+        self._last_notified_mtime: Optional[float] = None
+
+    def on_modified(self, event):  # pragma: no cover - relies on filesystem events
+        self._handle_event(event, [getattr(event, "src_path", None)])
+
+    def on_created(self, event):  # pragma: no cover - relies on filesystem events
+        self._handle_event(event, [getattr(event, "src_path", None)])
+
+    def on_moved(self, event):  # pragma: no cover - relies on filesystem events
+        paths = [getattr(event, "src_path", None), getattr(event, "dest_path", None)]
+        self._handle_event(event, paths)
+
+    def _handle_event(self, event, paths):
+        if getattr(event, "is_directory", False):
+            return
+        for path_str in paths:
+            if not path_str:
+                continue
+            if self._is_target(path_str):
+                self._process_change()
+                break
+
+    def _is_target(self, path_str: str) -> bool:
+        try:
+            candidate = Path(path_str).resolve()
+        except Exception:
+            candidate = Path(path_str)
+        try:
+            return candidate == self._target_path or candidate.samefile(self._target_path)
+        except Exception:
+            return candidate == self._target_path
+
+    def _process_change(self):
+        now = dt.datetime.now()
+        try:
+            mtime = self.store.excel_path.stat().st_mtime
+        except FileNotFoundError:
+            return
+
+        last_saved_at, last_saved_mtime = self.store.get_last_saved_markers()
+        if (
+            last_saved_at
+            and last_saved_mtime is not None
+            and abs(mtime - last_saved_mtime) < 0.5
+            and (now - last_saved_at).total_seconds() < self.debounce_seconds
+        ):
+            return
+
+        if self._last_notified_mtime is not None and abs(mtime - self._last_notified_mtime) < 0.5:
+            return
+
+        try:
+            self.store.load_excel()
+            push_excel_update(self.window, self.store)
+            self._last_notified_mtime = mtime
+            timestamp = now.strftime("%H:%M:%S")
+            print(f"[kanban] Excel change detected ({timestamp}), board updated.")
+        except Exception as exc:
+            print(f"[kanban] Failed to handle Excel change: {exc}")
+
+
+def start_excel_watcher(
+    window,
+    store: TaskStore,
+    *,
+    debounce_seconds: float = 2.0,
+    use_polling: bool = False,
+    poll_interval: float = 1.0,
+):
+    if Observer is None:
+        print("[kanban] watchdog is not installed; file watching is disabled.")
+        return None
+
+    observer_cls = Observer
+    if use_polling and PollingObserver is not None:
+        observer_cls = PollingObserver
+
+    try:
+        if observer_cls is PollingObserver:
+            observer = observer_cls(timeout=max(0.1, float(poll_interval)))
+        else:
+            observer = observer_cls()
+    except TypeError:
+        observer = observer_cls()
+
+    handler = ExcelFileWatcher(store, window, debounce_seconds=debounce_seconds)
+    watch_path = str(store.excel_path.parent)
+    observer.schedule(handler, watch_path, recursive=False)
+    observer.daemon = True
+    observer.start()
+    mode = "PollingObserver" if observer_cls is PollingObserver else "Observer"
+    print(f"[kanban] Started Excel watcher using {mode} on {watch_path}.")
+    return observer
 
 
 class JsApi:
@@ -510,6 +666,28 @@ def main():
         default=None,
         help="Excel ファイルから読み込むシート名 (未指定時は先頭のシート)",
     )
+    parser.add_argument(
+        "--no-watch",
+        action="store_true",
+        help="Excel ファイルの変更監視を無効化します",
+    )
+    parser.add_argument(
+        "--watch-polling",
+        action="store_true",
+        help="watchdog の PollingObserver を使用します (ネットワークドライブ等向け)",
+    )
+    parser.add_argument(
+        "--watch-interval",
+        type=float,
+        default=1.0,
+        help="PollingObserver 利用時の監視間隔（秒）",
+    )
+    parser.add_argument(
+        "--watch-debounce",
+        type=float,
+        default=2.0,
+        help="アプリ自身の保存直後に発生したイベントを無視する猶予時間（秒）",
+    )
     args = parser.parse_args()
 
     excel_path = Path(args.excel).expanduser().resolve()
@@ -528,8 +706,35 @@ def main():
         js_api=api,
     )
 
+    def bootstrap_file_watcher():  # pragma: no cover - runtime behaviour
+        if args.no_watch:
+            print("[kanban] File watcher disabled via --no-watch option.")
+            return
+
+        observer = start_excel_watcher(
+            window,
+            store,
+            debounce_seconds=max(0.0, float(args.watch_debounce)),
+            use_polling=args.watch_polling,
+            poll_interval=float(args.watch_interval),
+        )
+        if observer is None:
+            return
+
+        def _stop_observer():
+            try:
+                observer.stop()
+                observer.join(timeout=5)
+                print("[kanban] Excel watcher stopped.")
+            except Exception:
+                pass
+
+        events = getattr(window, "events", None)
+        if events is not None and hasattr(events, "closed"):
+            events.closed += _stop_observer
+
     webview.start(
-        func=None,
+        func=bootstrap_file_watcher,
         debug=args.debug,
         http_server=False,
         gui="edgechromium",

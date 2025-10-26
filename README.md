@@ -54,7 +54,7 @@ VisualExcelTaskForKanban/
 ### 必要な Python パッケージ
 
 ```
-pip install pandas openpyxl pywebview
+pip install pandas openpyxl pywebview watchdog
 ```
 
 ※ Windows で WebView2 ランタイムが未導入の場合は [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/#download-section) のインストールが必要になることがあります。
@@ -84,10 +84,22 @@ PyWebView ウィンドウが開き、カンバンボードが表示されます�
 | `--width` | `1280` | ウィンドウ幅（ピクセル） |
 | `--height` | `800` | ウィンドウ高さ（ピクセル） |
 | `--debug` | `False` | PyWebView のデバッグモードを有効化（開発時向け） |
+| `--no-watch` | `False` | Excel ファイルの変更監視を無効化 |
+| `--watch-polling` | `False` | ファイル監視に PollingObserver を利用（ネットワークドライブ向け） |
+| `--watch-interval` | `1.0` | PollingObserver 利用時のポーリング間隔（秒） |
+| `--watch-debounce` | `2.0` | アプリ自身の保存直後に発生するイベントを無視する猶予時間（秒） |
 
 ### Windows 用バッチ
 
 Windows で Miniconda を利用している場合は、`tools/VisualExcelTaskForKanban.bat` を編集して利用することで、仮想環境の有効化とアプリ起動をまとめて行えます。
+
+### Excel ファイルの自動監視
+
+- バックエンドは [watchdog](https://pypi.org/project/watchdog/) を利用して Excel ファイルの変更を常時監視し、保存を検知すると自動で `load_excel()` を実行します。
+- 監視で取得した最新データは PyWebView 経由でフロントエンドへプッシュされ、手動の「再読込」操作なしでボードが更新されます。
+- 監視が不要な場合は `--no-watch` を指定してください。ネットワークドライブなどの環境では `--watch-polling`（必要に応じて `--watch-interval`）でポーリング監視へ切り替えられます。
+- アプリの保存直後に発生する監視イベントは `--watch-debounce` で指定した秒数だけ無視されるため、無限ループで再読込されることはありません。
+- 動作確認はアプリ起動中に Excel を外部で編集・保存し、数秒後にボードへ自動反映されることを確認してください。
 
 ## ライセンス
 
