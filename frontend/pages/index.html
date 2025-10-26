@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>タスク・カンバン</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      /* slate-900 */
+      --panel: #111827;
+      /* gray-900 */
+      --col: #0b1220;
+      /* deep panel */
+      --card: #111827;
+      /* gray-900 */
+      --accent: #60a5fa;
+      /* blue-400 */
+      --accent-2: #34d399;
+      /* emerald-400 */
+      --text: #e5e7eb;
+      /* gray-200 */
+      --muted: #9ca3af;
+      /* gray-400 */
+      --danger: #ef4444;
+      /* red-500 */
+      --yellow: #f59e0b;
+      /* amber-500 */
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      --radius: 14px;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 800px at 20% 0%, #0b1840, #0f172a 60%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", "Yu Gothic", "Meiryo", sans-serif;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 12px 16px;
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(8px);
+      box-shadow: var(--shadow);
+      z-index: 50;
+    }
+
+    .toolbar .title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-right: auto;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: #0b2a52;
+      color: #cfe6ff;
+      box-shadow: var(--shadow);
+      transition: transform .07s ease, background .2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #1553b8, #0ea5e9);
+      color: white;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #0e9f6e, #22c55e);
+      color: white;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: white;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      box-shadow: none;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-left: 8px;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .column {
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-height: 220px;
+      overflow: hidden;
+    }
+
+    .column-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .column-title {
+      font-weight: 600;
+    }
+
+    .column-count {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .column-body {
+      padding: 12px;
+      gap: 10px;
+      display: flex;
+      flex-direction: column;
+      min-height: 150px;
+      flex: 1;
+    }
+
+    .dropzone {
+      border: 2px dashed transparent;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color .15s ease, background .15s ease;
+      box-sizing: border-box;
+      flex: 1;
+    }
+
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(96, 165, 250, 0.07);
+    }
+
+    .card {
+      background: linear-gradient(180deg, #111827, #0d1424);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+      cursor: grab;
+    }
+
+    .card:active {
+      cursor: grabbing;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .card-no {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .card-title {
+      font-weight: 600;
+    }
+
+    .badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .badge-assignee {
+      color: #c4f5d2;
+      background: rgba(52, 211, 153, 0.12);
+    }
+
+    .badge-date {
+      color: #fde68a;
+      background: rgba(245, 158, 11, 0.12);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card.due-warning {
+      border-color: rgba(245, 158, 11, 0.6);
+      box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35), var(--shadow);
+    }
+
+    .card.due-overdue {
+      border-color: rgba(239, 68, 68, 0.7);
+      box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.4), var(--shadow);
+    }
+
+    .badge-date.due-warning {
+      color: #fef3c7;
+      background: rgba(245, 158, 11, 0.2);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+
+    .badge-date.due-overdue {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.22);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .toolbar-due {
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-start;
+      margin-right: 8px;
+    }
+
+    .toolbar-due.active {
+      display: flex;
+    }
+
+    .toolbar-due-badges {
+      display: flex;
+      gap: 6px;
+    }
+
+    .due-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .due-indicator .count {
+      font-weight: 600;
+    }
+
+    .due-indicator.due-overdue {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.18);
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    .due-indicator.due-warning {
+      color: #fef3c7;
+      background: rgba(245, 158, 11, 0.18);
+      border-color: rgba(245, 158, 11, 0.38);
+    }
+
+    .due-toast {
+      font-size: 12px;
+      color: var(--muted);
+      background: rgba(15, 23, 42, 0.75);
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: var(--shadow);
+    }
+
+    .badge-priority {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.15);
+    }
+
+    .card-meta {
+      display: flex;
+      gap: 6px;
+      margin: 6px 0 8px;
+      flex-wrap: wrap;
+    }
+
+    .card-notes {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
+    /* ==== Filters ==== */
+    .filters-bar {
+      display: flex;
+      gap: 14px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      padding: 8px 16px 0;
+      margin: 0 0 8px;
+    }
+
+    .filter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 160px;
+    }
+
+    .filter label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .filter select,
+    .filter input[type="date"],
+    .filter input[type="text"] {
+      background: #0a1020;
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 6px 10px;
+    }
+
+    .status-checks {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-checks label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      background: #0a1020;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+    }
+
+    .filters-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 8px;
+    }
+
+    /* モーダル */
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 100;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(680px, calc(100% - 24px));
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .modal-card.validation-card {
+      width: min(720px, calc(100% - 24px));
+      max-height: calc(100% - 32px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .modal-title {
+      font-weight: 700;
+    }
+
+    .form {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .form .row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .form input[type="text"],
+    .form input[type="date"],
+    .form select,
+    .form textarea {
+      background: #0a1020;
+      color: var(--text);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+
+    .form textarea {
+      min-height: 80px;
+      grid-column: 1 / -1;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .validation-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 12px;
+      overflow-y: auto;
+      padding-right: 4px;
+      max-height: 360px;
+    }
+
+    .validation-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .validation-item textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    .validation-note {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .danger {
+      color: #ffd6d6;
+    }
+
+    .footer-hint {
+      color: var(--muted);
+      font-size: 12px;
+      padding: 0 16px 10px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <div class="title">タスク・カンバン</div>
+    <div class="toolbar-due" id="toolbar-due" aria-live="polite">
+      <div class="toolbar-due-badges">
+        <span id="due-overdue-count" class="due-indicator due-overdue" hidden>期限超過 <span class="count">0</span></span>
+        <span id="due-warning-count" class="due-indicator due-warning" hidden>期限間近 <span class="count">0</span></span>
+      </div>
+      <div id="due-toast" class="due-toast" hidden></div>
+    </div>
+    <button id="btn-add" class="btn btn-primary">＋ 追加</button>
+    <button id="btn-save" class="btn btn-success">保存</button>
+    <button id="btn-validations" class="btn">入力規則</button>
+    <button id="btn-reload" class="btn">再読込</button>
+    <button id="btn-timeline" class="btn">タイムライン</button>
+    <span class="hint">ドラッグ＆ドロップで列に移動できます</span>
+  </div>
+
+
+  <!-- フィルター -->
+  <div class="filters-bar" id="filters-bar">
+    <div class="filter">
+      <label for="flt-assignee">担当者</label>
+      <select id="flt-assignee">
+        <option value="__ALL__">（全員）</option>
+      </select>
+    </div>
+
+    <div class="filter" style="min-width:260px;flex:1;">
+      <label>ステータス</label>
+      <div class="status-checks" id="flt-statuses"></div>
+    </div>
+
+    <div class="filter" style="min-width:260px;flex:1;">
+      <label for="flt-keyword">キーワード</label>
+      <input type="text" id="flt-keyword" placeholder="タスク・備考を検索" />
+    </div>
+
+    <div class="filter" style="min-width:320px;">
+      <label>期限</label>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="flt-date-mode" title="期限フィルター">
+          <option value="none">指定なし</option>
+          <option value="range">範囲指定</option>
+          <option value="before">指定日以前</option>
+          <option value="after">指定日以後</option>
+        </select>
+        <input type="date" id="flt-date-from" />
+        <span id="flt-date-sep" style="display:none;">〜</span>
+        <input type="date" id="flt-date-to" style="display:none;" />
+      </div>
+    </div>
+
+    <div class="filters-actions">
+      <button id="btn-clear-filters" class="btn">フィルター解除</button>
+    </div>
+  </div>
+
+
+  <div id="board" class="board" aria-live="polite"></div>
+  <div class="footer-hint">※ 期限は YYYY-MM-DD（例: 2025-10-25）</div>
+
+  <!-- 入力規則モーダル -->
+  <div id="validation-modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card validation-card">
+      <div class="modal-header">
+        <div class="modal-title">入力規則の設定</div>
+        <button id="btn-validation-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div>
+        <p class="validation-note">1 行に 1 候補を入力してください。空行は無視されます。</p>
+        <div id="validation-editor" class="validation-editor" role="region" aria-live="polite"></div>
+      </div>
+      <div class="modal-actions">
+        <span style="flex:1"></span>
+        <button id="btn-validation-cancel" class="btn">キャンセル</button>
+        <button id="btn-validation-save" class="btn btn-success">適用</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編集モーダル -->
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">タスク編集</div>
+        <button id="btn-close" class="btn btn-ghost">✕</button>
+      </div>
+      <form id="task-form" class="form">
+        <input type="hidden" id="f-no" />
+        <div class="row">
+          <label for="f-status">ステータス</label>
+          <select id="f-status"></select>
+        </div>
+        <div class="row">
+          <label for="f-priority">優先度</label>
+          <input type="text" id="f-priority" placeholder="例: 1, 高, 中 など" />
+        </div>
+        <div class="row">
+          <label for="f-assignee">担当者</label>
+          <input type="text" id="f-assignee" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-title">タスク</label>
+          <input type="text" id="f-title" />
+        </div>
+        <div class="row">
+          <label for="f-due">期限</label>
+          <input type="date" id="f-due" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-notes">備考</label>
+          <textarea id="f-notes"></textarea>
+        </div>
+        <div class="modal-actions" id="modal-actions">
+          <button type="button" id="btn-delete" class="btn btn-danger">削除</button>
+          <span style="flex:1"></span>
+          <button type="button" id="btn-cancel" class="btn">キャンセル</button>
+          <button type="submit" class="btn btn-success">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+    <script src="../scripts/index.js"></script>
+</body>
+
+</html>

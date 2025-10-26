@@ -499,8 +499,8 @@ class JsApi:
 
 def main():
     parser = argparse.ArgumentParser(description="Excel Kanban backend")
-    parser.add_argument("--excel", default="./task.xlsx")
-    parser.add_argument("--html", default="./index.html")
+    parser.add_argument("--excel", default="./data/task.xlsx")
+    parser.add_argument("--html", default="./frontend/pages/index.html")
     parser.add_argument("--title", default="タスク・ボード")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=800)

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>担当者タイムライン</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: rgba(15, 23, 42, 0.85);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #22c55e;
+      --danger: #f87171;
+      --warning: #facc15;
+      --info: #818cf8;
+      --border: rgba(148, 163, 184, 0.2);
+      --shadow: 0 10px 36px rgba(8, 15, 40, 0.5);
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1400px 900px at 20% -10%, #132047, #0f172a 55%);
+      color: var(--text);
+      font-family: "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(10px);
+      box-shadow: var(--shadow);
+      z-index: 100;
+    }
+
+    .title {
+      font-weight: 600;
+      font-size: 18px;
+      letter-spacing: 0.03em;
+    }
+
+    .toolbar-spacer {
+      flex: 1;
+    }
+
+    .btn {
+      appearance: none;
+      border: 0;
+      cursor: pointer;
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: rgba(56, 189, 248, 0.15);
+      color: #e0f2fe;
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      transition: transform .1s ease, background .2s ease;
+      font-size: 14px;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      background: rgba(56, 189, 248, 0.25);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #0ea5e9);
+      color: #f8fafc;
+      border-color: transparent;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      border-color: rgba(148, 163, 184, 0.4);
+      color: var(--muted);
+    }
+
+    .page {
+      padding: 18px 18px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-end;
+    }
+
+    .controls .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 160px;
+    }
+
+    .controls label {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    .controls input[type="date"],
+    .controls select {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.4);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 7px 10px;
+      min-height: 36px;
+      font-size: 13px;
+    }
+
+    .controls select {
+      appearance: none;
+      cursor: pointer;
+    }
+
+    .controls .quick {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .controls .quick button {
+      font-size: 13px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(129, 140, 248, 0.15);
+      color: #c7d2fe;
+      border: 1px solid rgba(129, 140, 248, 0.35);
+      cursor: pointer;
+    }
+
+    .controls .quick button:hover {
+      background: rgba(129, 140, 248, 0.25);
+    }
+
+    .summary {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .timeline-wrapper {
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.72);
+    }
+
+    table.timeline {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      min-width: 640px;
+      font-size: 13px;
+    }
+
+    table.timeline thead th {
+      position: sticky;
+      top: 0;
+      background: rgba(15, 23, 42, 0.92);
+      backdrop-filter: blur(4px);
+      z-index: 2;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.4);
+      padding: 10px 12px;
+      white-space: nowrap;
+      text-align: center;
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+
+    table.timeline tbody th {
+      position: sticky;
+      left: 0;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(4px);
+      z-index: 1;
+      text-align: left;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    table.timeline td,
+    table.timeline th {
+      border-right: 1px solid rgba(148, 163, 184, 0.2);
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 10px 12px;
+      min-width: 120px;
+      vertical-align: top;
+    }
+
+    table.timeline tbody tr:last-child td,
+    table.timeline tbody tr:last-child th {
+      border-bottom: none;
+    }
+
+    table.timeline td:last-child,
+    table.timeline th:last-child {
+      border-right: none;
+    }
+
+    .day-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: center;
+      font-size: 12px;
+    }
+
+    .day-label .date {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .day-label .weekday {
+      color: var(--muted);
+    }
+
+    .task-chip {
+      display: block;
+      padding: 8px 10px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      background: rgba(148, 163, 184, 0.15);
+      border-left: 4px solid rgba(148, 163, 184, 0.45);
+      box-shadow: 0 8px 18px rgba(8, 15, 40, 0.35);
+    }
+
+    .task-chip:last-child {
+      margin-bottom: 0;
+    }
+
+    .task-title {
+      font-weight: 600;
+      color: #f8fafc;
+      margin-bottom: 4px;
+    }
+
+    .task-meta {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .task-chip.status-未着手 {
+      background: rgba(248, 113, 113, 0.15);
+      border-left-color: rgba(248, 113, 113, 0.75);
+    }
+
+    .task-chip.status-進行中 {
+      background: rgba(14, 165, 233, 0.15);
+      border-left-color: rgba(14, 165, 233, 0.7);
+    }
+
+    .task-chip.status-完了 {
+      background: rgba(34, 197, 94, 0.18);
+      border-left-color: rgba(34, 197, 94, 0.7);
+    }
+
+    .task-chip.status-保留 {
+      background: rgba(250, 204, 21, 0.18);
+      border-left-color: rgba(250, 204, 21, 0.7);
+    }
+
+    .task-chip.status-other {
+      background: rgba(129, 140, 248, 0.18);
+      border-left-color: rgba(129, 140, 248, 0.65);
+    }
+
+    .empty-cell {
+      color: rgba(148, 163, 184, 0.5);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(15, 23, 42, 0.6);
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(148, 163, 184, 0.6);
+    }
+
+    .message {
+      text-align: center;
+      color: var(--muted);
+      padding: 24px 0;
+    }
+
+    @media (max-width: 720px) {
+      .controls {
+        gap: 12px;
+      }
+
+      .controls .field {
+        min-width: 140px;
+      }
+
+      table.timeline td,
+      table.timeline th {
+        min-width: 100px;
+        padding: 8px 10px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="toolbar">
+    <div class="title">担当者タイムライン</div>
+    <div class="toolbar-spacer"></div>
+    <a href="index.html" class="btn btn-ghost">カンバン表示へ</a>
+  </div>
+
+  <main class="page">
+    <section class="panel">
+      <h2 style="margin-top:0; margin-bottom:14px; font-size:16px;">表示期間</h2>
+      <div class="controls">
+        <div class="field">
+          <label for="date-from">開始日</label>
+          <input id="date-from" type="date" />
+        </div>
+        <div class="field">
+          <label for="date-to">終了日</label>
+          <input id="date-to" type="date" />
+        </div>
+        <div class="field">
+          <label for="assignee-filter">担当者</label>
+          <select id="assignee-filter">
+            <option value="">すべて</option>
+          </select>
+        </div>
+        <button id="btn-apply" class="btn btn-primary">表示を更新</button>
+        <div class="quick">
+          <button data-shift="-7">◀ 前週</button>
+          <button data-range="this-week">今週</button>
+          <button data-shift="7">翌週 ▶</button>
+        </div>
+      </div>
+      <p id="summary" class="summary" style="margin-top:14px;"></p>
+    </section>
+
+    <section class="panel" style="display:flex; flex-direction:column; gap:16px;">
+      <div class="legend" id="legend"></div>
+      <div class="timeline-wrapper" id="timeline-wrapper">
+        <div class="message">読み込み中...</div>
+      </div>
+    </section>
+  </main>
+
+    <script src="../scripts/timeline.js"></script>
+</body>
+
+</html>
