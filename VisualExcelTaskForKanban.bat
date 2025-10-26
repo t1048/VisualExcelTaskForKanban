@@ -1,14 +1,12 @@
 @echo off
-REM Miniconda 環境を有効化
+REM Miniconda ���s�o�b�`
 
 SETLOCAL
 
-REM Miniconda の仮想環境をアクティブにする
+REM Miniconda ��
 CALL "%USERPROFILE%\miniconda3\Scripts\activate.bat" py310
 
-REM リポジトリルートに移動してバックエンドを起動
-pushd "%~dp0.."
-python backend\backend.py --excel .\data\task.xlsx --sheet ^タスク
+python backend\backend.py --excel .\data\task.xlsx --sheet ^�^�X�N
 popd
 
 ENDLOCAL
