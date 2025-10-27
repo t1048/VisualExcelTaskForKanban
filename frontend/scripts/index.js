@@ -201,6 +201,7 @@ ready(async () => {
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
+const UNSET_STATUS_LABEL = 'ステータス未設定';
 const ASSIGNEE_FILTER_ALL = '__ALL__';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 
@@ -227,6 +228,16 @@ function sanitizeTaskList(rawList) {
     }
   });
   return result;
+}
+
+function normalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text || UNSET_STATUS_LABEL;
+}
+
+function denormalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text === UNSET_STATUS_LABEL ? '' : text;
 }
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 const CATEGORY_FILTER_ALL = '__CATEGORY_ALL__';
@@ -328,7 +339,7 @@ function applyValidationState(raw) {
   }
 
   const seen = new Set();
-  const ordered = [];
+  let ordered = [];
   STATUSES.forEach(s => {
     const text = String(s ?? '').trim();
     if (!text || seen.has(text)) return;
@@ -336,12 +347,17 @@ function applyValidationState(raw) {
     ordered.push(text);
   });
 
+  let hasEmptyTaskStatus = false;
   if (Array.isArray(TASKS)) {
     TASKS.forEach(t => {
-      const name = String(t?.ステータス ?? '').trim();
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      ordered.push(name);
+      const raw = String(t?.ステータス ?? '').trim();
+      if (!raw) {
+        hasEmptyTaskStatus = true;
+        return;
+      }
+      if (seen.has(raw)) return;
+      seen.add(raw);
+      ordered.push(raw);
     });
   }
 
@@ -354,6 +370,12 @@ function applyValidationState(raw) {
     });
   }
 
+  if (hasEmptyTaskStatus) {
+    ordered = [UNSET_STATUS_LABEL, ...ordered.filter(s => s !== UNSET_STATUS_LABEL)];
+  } else {
+    ordered = ordered.filter((s, idx) => s !== UNSET_STATUS_LABEL || ordered.indexOf(s) === idx);
+  }
+
   STATUSES = ordered;
 }
 
@@ -364,6 +386,14 @@ function syncFilterStatuses(prevSelection) {
   statuses.forEach(s => {
     if (base.has(s)) next.add(s);
   });
+  const hasUnset = statuses.includes(UNSET_STATUS_LABEL);
+  if (hasUnset) {
+    const hadUnset = base.has(UNSET_STATUS_LABEL);
+    const emptyExists = Array.isArray(TASKS) && TASKS.some(t => !String(t?.ステータス ?? '').trim());
+    if (hadUnset || emptyExists || base.size === 0) {
+      next.add(UNSET_STATUS_LABEL);
+    }
+  }
   if (next.size === 0) {
     statuses.forEach(s => next.add(s));
   }
@@ -424,8 +454,9 @@ function renderBoard() {
     title.textContent = status;
     const count = document.createElement('div');
     count.className = 'column-count';
+    const columnTasks = FILTERED.filter(t => normalizeStatusLabel(t.ステータス) === status);
     // ↓ 絞り込み済みから件数を出す
-    count.textContent = `${FILTERED.filter(t => t.ステータス === status).length} 件`;
+    count.textContent = `${columnTasks.length} 件`;
 
     header.appendChild(title);
     header.appendChild(count);
@@ -439,8 +470,7 @@ function renderBoard() {
     drop.addEventListener('drop', e => onDropCard(e, status, drop));
 
     // ↓ 絞り込み済みから、その列のカードを描画
-    FILTERED
-      .filter(t => t.ステータス === status)
+    columnTasks
       .sort((a, b) => comparePriorityValues(a.優先度, b.優先度) || (a.No || 0) - (b.No || 0))
       .forEach(task => drop.appendChild(renderCard(task)));
 
@@ -821,9 +851,10 @@ async function onDropCard(e, newStatus, dropzone) {
   if (!no) return;
 
   try {
-    await api.move_task(no, newStatus);
+    const nextStatus = denormalizeStatusLabel(newStatus);
+    await api.move_task(no, nextStatus);
     const idx = TASKS.findIndex(t => t.No === no);
-    if (idx >= 0) TASKS[idx].ステータス = newStatus;
+    if (idx >= 0) TASKS[idx].ステータス = nextStatus;
     renderBoard();
   } catch (err) {
     alert('移動に失敗しました: ' + (err?.message || err));
@@ -1023,7 +1054,8 @@ function getFilteredTasks() {
       if (who !== assignee) return false;
     }
     // ステータス
-    if (!statuses.has(t.ステータス)) return false;
+    const normalizedStatus = normalizeStatusLabel(t.ステータス);
+    if (!statuses.has(normalizedStatus)) return false;
 
     // キーワード（タスク・備考）
     if (keyword) {
@@ -1151,7 +1183,7 @@ function openModal(task, { mode }) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const payload = {
-      ステータス: fstat.value.trim(),
+      ステータス: denormalizeStatusLabel(fstat.value),
       大分類: fmajor ? fmajor.value.trim() : '',
       中分類: fminor ? fminor.value.trim() : '',
       タスク: fttl.value.trim(),

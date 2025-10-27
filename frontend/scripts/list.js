@@ -201,6 +201,7 @@ ready(async () => {
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
+const UNSET_STATUS_LABEL = 'ステータス未設定';
 const ASSIGNEE_FILTER_ALL = '__ALL__';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
@@ -243,7 +244,17 @@ function sanitizeTaskList(rawList) {
   return result;
 }
 
-const STATUS_SORT_SEQUENCE = ['', '未着手', '進行中', '完了', '保留中'];
+function normalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text || UNSET_STATUS_LABEL;
+}
+
+function denormalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text === UNSET_STATUS_LABEL ? '' : text;
+}
+
+const STATUS_SORT_SEQUENCE = ['', UNSET_STATUS_LABEL, '未着手', '進行中', '完了', '保留中'];
 
 const TABLE_COLUMN_CONFIG = [
   { key: 'no', label: 'No', width: '70px', sortable: true },
@@ -277,14 +288,17 @@ function compareLocaleStrings(a, b) {
 }
 
 function statusSortWeight(name) {
+  const normalized = normalizeStatusLabel(name);
+  const idx = STATUS_SORT_SEQUENCE.indexOf(normalized);
+  if (idx >= 0) return idx;
   const trimmed = normalizedText(name);
-  const idx = STATUS_SORT_SEQUENCE.indexOf(trimmed);
-  return idx >= 0 ? idx : 100;
+  const legacyIdx = STATUS_SORT_SEQUENCE.indexOf(trimmed);
+  return legacyIdx >= 0 ? legacyIdx : 100;
 }
 
 function compareStatusValues(a, b) {
-  const sa = normalizedText(a?.ステータス);
-  const sb = normalizedText(b?.ステータス);
+  const sa = normalizeStatusLabel(a?.ステータス);
+  const sb = normalizeStatusLabel(b?.ステータス);
   const wa = statusSortWeight(sa);
   const wb = statusSortWeight(sb);
   if (wa !== wb) return wa - wb;
@@ -357,8 +371,10 @@ const SORT_COMPARATORS = {
 };
 
 function defaultListComparator(a, b, statusOrder) {
-  const sa = statusOrder.has(a.ステータス) ? statusOrder.get(a.ステータス) : 999;
-  const sb = statusOrder.has(b.ステータス) ? statusOrder.get(b.ステータス) : 999;
+  const normalizedA = normalizeStatusLabel(a.ステータス);
+  const normalizedB = normalizeStatusLabel(b.ステータス);
+  const sa = statusOrder.has(normalizedA) ? statusOrder.get(normalizedA) : 999;
+  const sb = statusOrder.has(normalizedB) ? statusOrder.get(normalizedB) : 999;
   if (sa !== sb) return sa - sb;
   const pri = comparePriorityValues(a.優先度, b.優先度);
   if (pri !== 0) return pri;
@@ -450,7 +466,7 @@ function applyValidationState(raw) {
   }
 
   const seen = new Set();
-  const ordered = [];
+  let ordered = [];
   STATUSES.forEach(s => {
     const text = String(s ?? '').trim();
     if (!text || seen.has(text)) return;
@@ -458,12 +474,17 @@ function applyValidationState(raw) {
     ordered.push(text);
   });
 
+  let hasEmptyTaskStatus = false;
   if (Array.isArray(TASKS)) {
     TASKS.forEach(t => {
-      const name = String(t?.ステータス ?? '').trim();
-      if (!name || seen.has(name)) return;
-      seen.add(name);
-      ordered.push(name);
+      const raw = String(t?.ステータス ?? '').trim();
+      if (!raw) {
+        hasEmptyTaskStatus = true;
+        return;
+      }
+      if (seen.has(raw)) return;
+      seen.add(raw);
+      ordered.push(raw);
     });
   }
 
@@ -476,6 +497,12 @@ function applyValidationState(raw) {
     });
   }
 
+  if (hasEmptyTaskStatus) {
+    ordered = [UNSET_STATUS_LABEL, ...ordered.filter(s => s !== UNSET_STATUS_LABEL)];
+  } else {
+    ordered = ordered.filter((s, idx) => s !== UNSET_STATUS_LABEL || ordered.indexOf(s) === idx);
+  }
+
   STATUSES = ordered;
 }
 
@@ -486,6 +513,14 @@ function syncFilterStatuses(prevSelection) {
   statuses.forEach(s => {
     if (base.has(s)) next.add(s);
   });
+  const hasUnset = statuses.includes(UNSET_STATUS_LABEL);
+  if (hasUnset) {
+    const hadUnset = base.has(UNSET_STATUS_LABEL);
+    const emptyExists = Array.isArray(TASKS) && TASKS.some(t => !String(t?.ステータス ?? '').trim());
+    if (hadUnset || emptyExists || base.size === 0) {
+      next.add(UNSET_STATUS_LABEL);
+    }
+  }
   if (next.size === 0) {
     statuses.forEach(s => next.add(s));
   }
@@ -642,7 +677,7 @@ function renderList() {
       const statusTd = document.createElement('td');
       const statusPill = document.createElement('span');
       statusPill.className = 'status-pill';
-      statusPill.textContent = task.ステータス || '';
+      statusPill.textContent = normalizeStatusLabel(task.ステータス);
       statusTd.appendChild(statusPill);
       tr.appendChild(statusTd);
 
@@ -1182,7 +1217,8 @@ function getFilteredTasks() {
       if (who !== assignee) return false;
     }
     // ステータス
-    if (!statuses.has(t.ステータス)) return false;
+    const normalizedStatus = normalizeStatusLabel(t.ステータス);
+    if (!statuses.has(normalizedStatus)) return false;
 
     // キーワード（タスク・備考）
     if (keyword) {
@@ -1310,7 +1346,7 @@ function openModal(task, { mode }) {
   form.onsubmit = async (e) => {
     e.preventDefault();
     const payload = {
-      ステータス: fstat.value.trim(),
+      ステータス: denormalizeStatusLabel(fstat.value),
       大分類: fmajor ? fmajor.value.trim() : '',
       中分類: fminor ? fminor.value.trim() : '',
       タスク: fttl.value.trim(),

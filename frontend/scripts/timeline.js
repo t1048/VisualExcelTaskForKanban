@@ -368,8 +368,9 @@ function renderTimeline() {
 function renderTaskChip(task) {
   const div = document.createElement('div');
   div.className = 'task-chip';
-  if (task.ステータス) {
-    const rawClass = `status-${task.ステータス}`;
+  const statusText = String(task.ステータス ?? '').trim();
+  if (statusText) {
+    const rawClass = `status-${statusText}`;
     div.classList.add(rawClass);
     div.classList.add(sanitizeClass(rawClass));
   } else {
@@ -383,11 +384,9 @@ function renderTaskChip(task) {
 
   const meta = document.createElement('div');
   meta.className = 'task-meta';
-  if (task.ステータス) {
-    const status = document.createElement('span');
-    status.textContent = `ステータス: ${task.ステータス}`;
-    meta.appendChild(status);
-  }
+  const status = document.createElement('span');
+  status.textContent = `ステータス: ${statusText || '未設定'}`;
+  meta.appendChild(status);
   if (task.No) {
     const no = document.createElement('span');
     no.textContent = `No.${task.No}`;
