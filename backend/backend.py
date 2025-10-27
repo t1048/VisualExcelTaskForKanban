@@ -155,6 +155,11 @@ class TaskStore:
 
             df = df.dropna(how="all", subset=TASK_COLUMNS).reset_index(drop=True)
 
+            df["タスク"] = df["タスク"].apply(
+                lambda v: "" if pd.isna(v) else str(v).strip()
+            )
+            df = df[df["タスク"] != ""].reset_index(drop=True)
+
             if "期限" in df.columns:
                 df["期限"] = pd.to_datetime(df["期限"], errors="coerce").dt.date
 
@@ -366,6 +371,9 @@ class TaskStore:
             due = _from_iso_date_str(task.get("期限", ""))
             priority = _normalize_priority(task.get("優先度"))
 
+            if not title:
+                raise ValueError("タスクは必須項目です。")
+
             row = {
                 "ステータス": status,
                 "大分類": major,
@@ -386,24 +394,34 @@ class TaskStore:
         with self._lock:
             i = self._resolve_row_index(int(no_value))
             row_index = self._df.index[i]
+
+            updates: Dict[str, Any] = {}
+
             if "ステータス" in patch:
-                status = str(patch["ステータス"] or "").strip()
-                self._ensure_status_registered(status)
-                self._df.at[row_index, "ステータス"] = status
+                updates["ステータス"] = str(patch["ステータス"] or "").strip()
             if "大分類" in patch:
-                self._df.at[row_index, "大分類"] = str(patch["大分類"] or "").strip()
+                updates["大分類"] = str(patch["大分類"] or "").strip()
             if "中分類" in patch:
-                self._df.at[row_index, "中分類"] = str(patch["中分類"] or "").strip()
+                updates["中分類"] = str(patch["中分類"] or "").strip()
             if "タスク" in patch:
-                self._df.at[row_index, "タスク"] = str(patch["タスク"] or "").strip()
+                title = str(patch["タスク"] or "").strip()
+                if not title:
+                    raise ValueError("タスクは必須項目です。")
+                updates["タスク"] = title
             if "担当者" in patch:
-                self._df.at[row_index, "担当者"] = str(patch["担当者"] or "").strip()
+                updates["担当者"] = str(patch["担当者"] or "").strip()
             if "優先度" in patch:
-                self._df.at[row_index, "優先度"] = _normalize_priority(patch["優先度"])
+                updates["優先度"] = _normalize_priority(patch["優先度"])
             if "期限" in patch:
-                self._df.at[row_index, "期限"] = _from_iso_date_str(patch["期限"])
+                updates["期限"] = _from_iso_date_str(patch["期限"])
             if "備考" in patch:
-                self._df.at[row_index, "備考"] = str(patch["備考"] or "")
+                updates["備考"] = str(patch["備考"] or "")
+
+            if "ステータス" in updates:
+                self._ensure_status_registered(updates["ステータス"])
+
+            for column, value in updates.items():
+                self._df.at[row_index, column] = value
 
             return self._format_row(i, self._df.loc[row_index])
 

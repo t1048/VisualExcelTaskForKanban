@@ -6,6 +6,31 @@ const ASSIGNEE_FILTER_ALL = '';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 
+function sanitizeTaskRecord(task, fallbackIndex = 0) {
+  if (!task || typeof task !== 'object') return null;
+  const title = String(task.タスク ?? '').trim();
+  if (!title) return null;
+  const sanitized = { ...task, タスク: title };
+  const noValue = sanitized.No;
+  const noText = noValue === null || noValue === undefined ? '' : String(noValue).trim();
+  if (!noText) {
+    sanitized.No = fallbackIndex + 1;
+  }
+  return sanitized;
+}
+
+function sanitizeTaskList(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const result = [];
+  rawList.forEach(item => {
+    const sanitized = sanitizeTaskRecord(item, result.length);
+    if (sanitized) {
+      result.push(sanitized);
+    }
+  });
+  return result;
+}
+
 window.addEventListener('pywebviewready', async () => {
   try {
     api = window.pywebview.api;
@@ -55,11 +80,14 @@ async function init(force = false) {
     try {
       if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
         const result = await api.reload_from_excel();
-        TASKS = result?.tasks || await api.get_tasks();
+        const rawTasks = Array.isArray(result?.tasks)
+          ? result.tasks
+          : await api.get_tasks();
+        TASKS = sanitizeTaskList(rawTasks);
         STATUSES = result?.statuses || await api.get_statuses?.() || [];
       } else {
         STATUSES = typeof api.get_statuses === 'function' ? await api.get_statuses() : [];
-        TASKS = await api.get_tasks();
+        TASKS = sanitizeTaskList(await api.get_tasks());
       }
     } catch (err) {
       console.error('init failed', err);

@@ -64,11 +64,16 @@ function createMockApi() {
     const major = String(payload?.大分類 ?? '').trim();
     const minor = String(payload?.中分類 ?? '').trim();
 
+    const title = String(payload?.タスク ?? '').trim();
+    if (!title) {
+      throw new Error('タスクは必須です');
+    }
+
     return {
       ステータス: status,
       大分類: major,
       中分類: minor,
-      タスク: String(payload?.タスク ?? '').trim(),
+      タスク: title,
       担当者: String(payload?.担当者 ?? '').trim(),
       優先度: normalizePriority(payload?.優先度),
       期限: normalizeDue(payload?.期限),
@@ -198,6 +203,31 @@ const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タス
 const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
 const ASSIGNEE_FILTER_ALL = '__ALL__';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
+
+function sanitizeTaskRecord(task, fallbackIndex = 0) {
+  if (!task || typeof task !== 'object') return null;
+  const title = String(task.タスク ?? '').trim();
+  if (!title) return null;
+  const sanitized = { ...task, タスク: title };
+  const noValue = sanitized.No;
+  const noText = noValue === null || noValue === undefined ? '' : String(noValue).trim();
+  if (!noText) {
+    sanitized.No = fallbackIndex + 1;
+  }
+  return sanitized;
+}
+
+function sanitizeTaskList(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const result = [];
+  rawList.forEach(item => {
+    const sanitized = sanitizeTaskRecord(item, result.length);
+    if (sanitized) {
+      result.push(sanitized);
+    }
+  });
+  return result;
+}
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 const CATEGORY_FILTER_ALL = '__CATEGORY_ALL__';
 const CATEGORY_FILTER_MINOR_ALL = '__CATEGORY_MINOR_ALL__';
@@ -233,7 +263,7 @@ async function applyStateFromPayload(payload, options = {}) {
   const prevSelection = preserveFilters ? new Set(FILTERS.statuses) : new Set();
 
   if (Array.isArray(data.tasks)) {
-    TASKS = data.tasks;
+    TASKS = sanitizeTaskList(data.tasks);
   }
   if (Array.isArray(data.statuses)) {
     STATUSES = data.statuses;
@@ -1100,9 +1130,12 @@ function openModal(task, { mode }) {
       const ok = await api.delete_task(CURRENT_EDIT);
       if (ok) {
         if (typeof api.get_tasks === 'function') {
-          TASKS = await api.get_tasks();
+          TASKS = sanitizeTaskList(await api.get_tasks());
         } else {
-          TASKS = TASKS.filter(x => x.No !== CURRENT_EDIT).map((task, idx) => ({ ...task, No: idx + 1 }));
+          const remaining = TASKS
+            .filter(x => x.No !== CURRENT_EDIT)
+            .map((task, idx) => ({ ...task, No: idx + 1 }));
+          TASKS = sanitizeTaskList(remaining);
         }
         CURRENT_EDIT = null;
         closeModal(); renderBoard(); buildFiltersUI();
@@ -1128,15 +1161,31 @@ function openModal(task, { mode }) {
       備考: fnote.value
     };
 
+    if (!payload.タスク) {
+      alert('タスクを入力してください。');
+      fttl.focus();
+      return;
+    }
+
     try {
       if (mode === 'create') {
         const created = await api.add_task(payload);
-        TASKS.push(created);
+        const sanitized = sanitizeTaskRecord(created, TASKS.length);
+        if (sanitized) {
+          TASKS.push(sanitized);
+        }
       } else {
         const no = CURRENT_EDIT;
         const updated = await api.update_task(no, payload);
         const i = TASKS.findIndex(x => x.No === no);
-        if (i >= 0) TASKS[i] = updated;
+        if (i >= 0) {
+          const sanitized = sanitizeTaskRecord(updated, i);
+          if (sanitized) {
+            TASKS[i] = sanitized;
+          } else {
+            TASKS.splice(i, 1);
+          }
+        }
       }
       closeModal(); renderBoard(); buildFiltersUI();
     } catch (err) {
