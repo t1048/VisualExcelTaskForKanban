@@ -443,6 +443,11 @@ function renderBoard() {
   const FILTERED = getFilteredTasks();  // ← 追加
 
   STATUSES.forEach(status => {
+    const columnTasks = FILTERED.filter(t => normalizeStatusLabel(t.ステータス) === status);
+    if (status === UNSET_STATUS_LABEL && columnTasks.length === 0) {
+      return;
+    }
+
     const col = document.createElement('section');
     col.className = 'column';
     col.dataset.status = status;
@@ -454,7 +459,6 @@ function renderBoard() {
     title.textContent = status;
     const count = document.createElement('div');
     count.className = 'column-count';
-    const columnTasks = FILTERED.filter(t => normalizeStatusLabel(t.ステータス) === status);
     // ↓ 絞り込み済みから件数を出す
     count.textContent = `${columnTasks.length} 件`;
 
