@@ -213,6 +213,128 @@ let TASKS = [];
 let CURRENT_EDIT = null;
 let VALIDATIONS = {};
 
+const STATUS_SORT_SEQUENCE = ['', '未着手', '進行中', '完了', '保留中'];
+
+const TABLE_COLUMN_CONFIG = [
+  { key: 'no', label: 'No', width: '70px', sortable: true },
+  { key: 'major', label: '大分類', width: '160px', sortable: true },
+  { key: 'minor', label: '中分類', width: '160px', sortable: true },
+  { key: 'task', label: 'タスク', sortable: true },
+  { key: 'status', label: 'ステータス', width: '160px', sortable: true },
+  { key: 'assignee', label: '担当者', width: '160px', sortable: true },
+  { key: 'priority', label: '優先度', width: '140px', sortable: false },
+  { key: 'due', label: '期限', width: '160px', sortable: true },
+  { key: 'notes', label: '備考', sortable: false }
+];
+
+const COLUMN_CONFIG_BY_KEY = new Map();
+TABLE_COLUMN_CONFIG.forEach(col => {
+  COLUMN_CONFIG_BY_KEY.set(col.key, col);
+});
+
+let SORT_STATE = [];
+
+function normalizedText(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function compareLocaleStrings(a, b) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return a.localeCompare(b, 'ja');
+}
+
+function statusSortWeight(name) {
+  const trimmed = normalizedText(name);
+  const idx = STATUS_SORT_SEQUENCE.indexOf(trimmed);
+  return idx >= 0 ? idx : 100;
+}
+
+function compareStatusValues(a, b) {
+  const sa = normalizedText(a?.ステータス);
+  const sb = normalizedText(b?.ステータス);
+  const wa = statusSortWeight(sa);
+  const wb = statusSortWeight(sb);
+  if (wa !== wb) return wa - wb;
+  return sa.localeCompare(sb, 'ja');
+}
+
+function compareMajorValues(a, b) {
+  const ma = normalizedText(a?.大分類);
+  const mb = normalizedText(b?.大分類);
+  return compareLocaleStrings(ma, mb);
+}
+
+function compareMinorValues(a, b) {
+  const majorCmp = compareMajorValues(a, b);
+  if (majorCmp !== 0) return majorCmp;
+  const mina = normalizedText(a?.中分類);
+  const minb = normalizedText(b?.中分類);
+  return compareLocaleStrings(mina, minb);
+}
+
+function compareTaskValues(a, b) {
+  const ta = normalizedText(a?.タスク);
+  const tb = normalizedText(b?.タスク);
+  return compareLocaleStrings(ta, tb);
+}
+
+function compareAssigneeValues(a, b) {
+  const aa = normalizedText(a?.担当者);
+  const ab = normalizedText(b?.担当者);
+  return compareLocaleStrings(aa, ab);
+}
+
+function compareDueValues(a, b) {
+  const da = parseISO(a?.期限 || '');
+  const db = parseISO(b?.期限 || '');
+  if (da && db) {
+    const diff = da.getTime() - db.getTime();
+    if (diff !== 0) return diff;
+    return 0;
+  }
+  if (da) return -1;
+  if (db) return 1;
+  return 0;
+}
+
+function compareNoValues(a, b) {
+  const sa = normalizedText(a?.No);
+  const sb = normalizedText(b?.No);
+  const na = Number(sa);
+  const nb = Number(sb);
+  const validA = sa !== '' && Number.isFinite(na);
+  const validB = sb !== '' && Number.isFinite(nb);
+  if (validA && validB) {
+    if (na !== nb) return na - nb;
+    return 0;
+  }
+  if (validA) return -1;
+  if (validB) return 1;
+  return sa.localeCompare(sb, 'ja');
+}
+
+const SORT_COMPARATORS = {
+  no: compareNoValues,
+  status: compareStatusValues,
+  major: compareMajorValues,
+  minor: compareMinorValues,
+  task: compareTaskValues,
+  assignee: compareAssigneeValues,
+  due: compareDueValues,
+};
+
+function defaultListComparator(a, b, statusOrder) {
+  const sa = statusOrder.has(a.ステータス) ? statusOrder.get(a.ステータス) : 999;
+  const sb = statusOrder.has(b.ステータス) ? statusOrder.get(b.ステータス) : 999;
+  if (sa !== sb) return sa - sb;
+  const pri = comparePriorityValues(a.優先度, b.優先度);
+  if (pri !== 0) return pri;
+  return compareNoValues(a, b);
+}
+
 function normalizeStatePayload(payload) {
   if (!payload) return {};
   if (typeof payload === 'string') {
@@ -412,34 +534,51 @@ function renderList() {
   table.className = 'task-list';
 
   const thead = document.createElement('thead');
-  thead.innerHTML = `
-    <tr>
-      <th style="width:70px;">No</th>
-      <th style="width:160px;">大分類</th>
-      <th style="width:160px;">中分類</th>
-      <th>タスク</th>
-      <th style="width:160px;">ステータス</th>
-      <th style="width:160px;">担当者</th>
-      <th style="width:140px;">優先度</th>
-      <th style="width:160px;">期限</th>
-      <th>備考</th>
-    </tr>
-  `;
+  const headerRow = document.createElement('tr');
+  TABLE_COLUMN_CONFIG.forEach(col => {
+    const th = document.createElement('th');
+    if (col.width) th.style.width = col.width;
+    th.textContent = col.label;
+    if (col.sortable) {
+      th.classList.add('sortable');
+      th.dataset.columnKey = col.key;
+      th.setAttribute('aria-sort', 'none');
+      th.tabIndex = 0;
+      th.addEventListener('click', () => handleSortToggle(col.key));
+      th.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          handleSortToggle(col.key);
+        }
+      });
+    }
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
   table.appendChild(thead);
+  applySortHeaderState(thead);
 
   const tbody = document.createElement('tbody');
 
-  filtered
+  const activeSorts = SORT_STATE.filter(entry => SORT_COMPARATORS[entry.key]);
+
+  const sortedTasks = filtered
     .slice()
     .sort((a, b) => {
-      const sa = statusOrder.has(a.ステータス) ? statusOrder.get(a.ステータス) : 999;
-      const sb = statusOrder.has(b.ステータス) ? statusOrder.get(b.ステータス) : 999;
-      if (sa !== sb) return sa - sb;
-      const pri = comparePriorityValues(a.優先度, b.優先度);
-      if (pri !== 0) return pri;
-      return (a.No || 0) - (b.No || 0);
-    })
-    .forEach(task => {
+      if (activeSorts.length > 0) {
+        for (const entry of activeSorts) {
+          const comparator = SORT_COMPARATORS[entry.key];
+          if (!comparator) continue;
+          const result = comparator(a, b);
+          if (result !== 0) {
+            return entry.direction === 'asc' ? result : -result;
+          }
+        }
+      }
+      return defaultListComparator(a, b, statusOrder);
+    });
+
+  sortedTasks.forEach(task => {
       const tr = document.createElement('tr');
       tr.dataset.no = String(task.No || '');
       tr.addEventListener('dblclick', () => openEdit(task.No));
@@ -518,6 +657,45 @@ function renderList() {
   container.appendChild(table);
 
   updateDueIndicators(filtered);
+}
+
+
+function handleSortToggle(columnKey) {
+  const column = COLUMN_CONFIG_BY_KEY.get(columnKey);
+  if (!column || !column.sortable) return;
+
+  const idx = SORT_STATE.findIndex(entry => entry.key === columnKey);
+  if (idx === -1) {
+    SORT_STATE.push({ key: columnKey, direction: 'asc' });
+  } else if (SORT_STATE[idx].direction === 'asc') {
+    SORT_STATE[idx].direction = 'desc';
+  } else {
+    SORT_STATE.splice(idx, 1);
+  }
+
+  renderList();
+}
+
+function applySortHeaderState(thead) {
+  if (!thead) return;
+  const stateMap = new Map();
+  SORT_STATE.forEach((entry, idx) => {
+    stateMap.set(entry.key, { direction: entry.direction, order: idx + 1 });
+  });
+
+  thead.querySelectorAll('th[data-column-key]').forEach(th => {
+    const key = th.dataset.columnKey;
+    const info = stateMap.get(key);
+    if (info) {
+      th.dataset.sortDirection = info.direction;
+      th.dataset.sortOrder = String(info.order);
+      th.setAttribute('aria-sort', info.direction === 'asc' ? 'ascending' : 'descending');
+    } else {
+      th.removeAttribute('data-sort-direction');
+      th.removeAttribute('data-sort-order');
+      th.setAttribute('aria-sort', 'none');
+    }
+  });
 }
 
 
