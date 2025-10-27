@@ -1229,7 +1229,20 @@ function parseISO(d) {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
+function isCompletedStatus(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return false;
+  const normalized = text.toLowerCase().replace(/\s+/g, '');
+  return normalized === '完了'
+    || normalized === '完了済み'
+    || normalized === '完了済'
+    || normalized === 'done'
+    || normalized === 'completed';
+}
+
 function getDueState(task) {
+  if (isCompletedStatus(task?.ステータス)) return null;
+
   const dueDate = parseISO(task?.期限 || '');
   if (!dueDate) return null;
 

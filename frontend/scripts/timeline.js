@@ -2,6 +2,10 @@ let api;
 let RUN_MODE = 'mock';
 let TASKS = [];
 let STATUSES = [];
+const PRIORITY_DEFAULT_OPTIONS = ['高', '中', '低'];
+const UNSET_STATUS_LABEL = 'ステータス未設定';
+let VALIDATIONS = {};
+let CURRENT_EDIT = null;
 const ASSIGNEE_FILTER_ALL = '';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
@@ -49,27 +53,171 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 function createMockApi() {
+  const baseStatuses = ['未着手', '進行中', '完了', '保留'];
+  const statusSet = new Set(baseStatuses);
+  const pad = n => String(n).padStart(2, '0');
+  const toISO = date => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   const today = new Date();
-  const format = d => d.toISOString().slice(0, 10);
+  const majorCategories = ['プロジェクトA', 'プロジェクトB', 'プロジェクトC'];
+  const minorCategories = ['企画', '設計', '実装', '検証'];
+  const sampleTasks = Array.from({ length: 8 }).map((_, idx) => {
+    const due = new Date(today);
+    due.setDate(today.getDate() + idx - 2);
+    const status = baseStatuses[idx % baseStatuses.length];
+    statusSet.add(status);
+    const major = majorCategories[idx % majorCategories.length];
+    const minor = minorCategories[idx % minorCategories.length];
+    return {
+      ステータス: status,
+      大分類: major,
+      中分類: minor,
+      タスク: `サンプルタスク ${idx + 1}`,
+      担当者: ['田中', '佐藤', '鈴木', '高橋'][idx % 4],
+      優先度: ['高', '中', '低'][idx % 3],
+      期限: toISO(due),
+      備考: idx % 2 === 0 ? 'モックデータ' : ''
+    };
+  });
+  const tasks = [...sampleTasks];
+  let validations = {
+    'ステータス': Array.from(statusSet),
+    '大分類': Array.from(new Set(majorCategories)),
+    '中分類': Array.from(new Set(minorCategories)),
+    '優先度': [...PRIORITY_DEFAULT_OPTIONS]
+  };
+
+  const cloneTask = task => ({ ...task });
+
+  const sanitizeStatus = status => {
+    const text = String(status ?? '').trim();
+    if (text) return text;
+    return baseStatuses[0];
+  };
+
+  const normalizeDue = value => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '';
+    return toISO(parsed);
+  };
+
+  const normalizePriority = value => {
+    if (value === null || value === undefined) return '';
+    const text = String(value).trim();
+    return text;
+  };
+
+  const normalizeTask = (payload) => {
+    const status = sanitizeStatus(payload?.ステータス);
+    statusSet.add(status);
+
+    const major = String(payload?.大分類 ?? '').trim();
+    const minor = String(payload?.中分類 ?? '').trim();
+
+    const title = String(payload?.タスク ?? '').trim();
+    if (!title) {
+      throw new Error('タスクは必須です');
+    }
+
+    return {
+      ステータス: status,
+      大分類: major,
+      中分類: minor,
+      タスク: title,
+      担当者: String(payload?.担当者 ?? '').trim(),
+      優先度: normalizePriority(payload?.優先度),
+      期限: normalizeDue(payload?.期限),
+      備考: String(payload?.備考 ?? '')
+    };
+  };
+
+  const withSequentialNo = () => tasks.map((task, idx) => ({ ...cloneTask(task), No: idx + 1 }));
+
+  const locateTask = (no) => {
+    const idx = Number(no) - 1;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= tasks.length) {
+      return null;
+    }
+    return { index: idx, record: tasks[idx] };
+  };
+
+  const updateValidations = (payload) => {
+    const withFallbacks = (source) => {
+      const merged = { ...source };
+      if (!Array.isArray(merged['ステータス']) || merged['ステータス'].length === 0) {
+        merged['ステータス'] = Array.from(statusSet);
+      }
+      if (!Array.isArray(merged['優先度']) || merged['優先度'].length === 0) {
+        merged['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
+      }
+      return merged;
+    };
+
+    if (!payload || typeof payload !== 'object') {
+      validations = withFallbacks({});
+      return validations;
+    }
+    const cleaned = {};
+    Object.keys(payload).forEach(key => {
+      const raw = Array.isArray(payload[key]) ? payload[key] : [];
+      const seen = new Set();
+      const values = [];
+      raw.forEach(v => {
+        const text = String(v ?? '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        values.push(text);
+      });
+      if (values.length > 0) cleaned[key] = values;
+    });
+    validations = withFallbacks(cleaned);
+    if (Array.isArray(validations['ステータス'])) {
+      validations['ステータス'].forEach(v => statusSet.add(v));
+    }
+    return validations;
+  };
+
   return {
     async get_tasks() {
-      const sample = [];
-      for (let i = 0; i < 6; i++) {
-        const due = new Date(today);
-        due.setDate(today.getDate() + i * 2);
-        sample.push({
-          No: i + 1,
-          ステータス: ['未着手', '進行中', '完了'][i % 3],
-          タスク: `サンプルタスク ${i + 1}`,
-          担当者: ['田中', '佐藤', '鈴木'][i % 3],
-          期限: format(due),
-          備考: 'モックデータ'
-        });
-      }
-      return sample;
+      return withSequentialNo();
     },
     async get_statuses() {
-      return ['未着手', '進行中', '完了', '保留'];
+      return Array.from(statusSet);
+    },
+    async get_validations() {
+      return { ...validations };
+    },
+    async update_validations(payload) {
+      const updated = updateValidations(payload);
+      return { ok: true, validations: { ...updated }, statuses: Array.from(statusSet) };
+    },
+    async add_task(payload) {
+      const record = normalizeTask(payload);
+      tasks.push(record);
+      return { ...cloneTask(record), No: tasks.length };
+    },
+    async update_task(no, payload) {
+      const located = locateTask(no);
+      if (!located) throw new Error('指定したタスクが見つかりません');
+      const updated = normalizeTask({ ...located.record, ...payload });
+      tasks[located.index] = updated;
+      return { ...cloneTask(updated), No: located.index + 1 };
+    },
+    async delete_task(no) {
+      const located = locateTask(no);
+      if (!located) return false;
+      tasks.splice(located.index, 1);
+      return true;
+    },
+    async reload_from_excel() {
+      return {
+        tasks: withSequentialNo(),
+        statuses: Array.from(statusSet),
+        validations: { ...validations }
+      };
+    },
+    async save_excel() {
+      return 'mock-data.xlsx';
     }
   };
 }
@@ -84,14 +232,34 @@ async function init(force = false) {
           ? result.tasks
           : await api.get_tasks();
         TASKS = sanitizeTaskList(rawTasks);
-        STATUSES = result?.statuses || await api.get_statuses?.() || [];
+        STATUSES = Array.isArray(result?.statuses) ? result.statuses : await api.get_statuses?.() || [];
+        applyValidationState(result?.validations);
+        if (!result?.validations && typeof api.get_validations === 'function') {
+          try {
+            applyValidationState(await api.get_validations());
+          } catch (err) {
+            console.warn('get_validations failed:', err);
+          }
+        }
       } else {
         STATUSES = typeof api.get_statuses === 'function' ? await api.get_statuses() : [];
         TASKS = sanitizeTaskList(await api.get_tasks());
+        if (typeof api.get_validations === 'function') {
+          try {
+            applyValidationState(await api.get_validations());
+          } catch (err) {
+            console.warn('get_validations failed:', err);
+            applyValidationState(null);
+          }
+        } else {
+          applyValidationState(null);
+        }
       }
     } catch (err) {
       console.error('init failed', err);
       TASKS = [];
+      STATUSES = [];
+      applyValidationState(null);
     }
   }
 
@@ -163,6 +331,23 @@ function wireControls() {
   assigneeSelect.addEventListener('change', () => {
     renderTimeline();
   });
+
+  const saveBtn = document.getElementById('btn-save');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      try {
+        if (typeof api?.save_excel !== 'function') {
+          alert('保存機能が利用できません。');
+          return;
+        }
+        const result = await api.save_excel();
+        const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
+        alert(message);
+      } catch (err) {
+        alert('保存に失敗: ' + (err?.message || err));
+      }
+    });
+  }
 }
 
 function shiftRange(deltaDays) {
@@ -398,6 +583,11 @@ function renderTaskChip(task) {
     meta.appendChild(notes);
   }
   div.appendChild(meta);
+  div.addEventListener('dblclick', () => {
+    if (task?.No) {
+      openEdit(task.No);
+    }
+  });
   return div;
 }
 
@@ -507,4 +697,269 @@ function statusColor(name) {
 
 function sanitizeClass(value) {
   return value.replace(/[^\w-]/g, '-');
+}
+
+function normalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text || UNSET_STATUS_LABEL;
+}
+
+function denormalizeStatusLabel(value) {
+  const text = String(value ?? '').trim();
+  return text === UNSET_STATUS_LABEL ? '' : text;
+}
+
+function normalizeValidationValues(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const seen = new Set();
+  const values = [];
+  rawList.forEach(item => {
+    const text = String(item ?? '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    values.push(text);
+  });
+  return values;
+}
+
+function applyValidationState(raw) {
+  const next = {};
+  if (raw && typeof raw === 'object') {
+    Object.keys(raw).forEach(key => {
+      next[key] = normalizeValidationValues(raw[key]);
+    });
+  }
+  if (!Array.isArray(next['優先度']) || next['優先度'].length === 0) {
+    next['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
+  }
+  VALIDATIONS = next;
+}
+
+function getPriorityOptions() {
+  const base = Array.isArray(VALIDATIONS['優先度']) && VALIDATIONS['優先度'].length > 0
+    ? VALIDATIONS['優先度']
+    : PRIORITY_DEFAULT_OPTIONS;
+  const seen = new Set();
+  const options = [];
+  base.forEach(value => {
+    const text = String(value ?? '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    options.push(text);
+  });
+  if (options.length === 0) {
+    PRIORITY_DEFAULT_OPTIONS.forEach(value => {
+      if (!seen.has(value)) {
+        seen.add(value);
+        options.push(value);
+      }
+    });
+  }
+  return options;
+}
+
+function getDefaultPriorityValue() {
+  const options = getPriorityOptions();
+  if (options.includes('中')) return '中';
+  return options[0] || '';
+}
+
+function applyPriorityOptions(selectEl, currentValue, preferDefault = false) {
+  if (!selectEl) return;
+  const normalized = currentValue === null || currentValue === undefined
+    ? ''
+    : String(currentValue).trim();
+  const options = getPriorityOptions();
+  const fragments = [];
+  const addOption = (value, label = value) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    fragments.push(opt);
+  };
+
+  if (!normalized && !preferDefault) {
+    addOption('', '（未設定）');
+  }
+  options.forEach(value => addOption(value));
+  if (normalized && !options.includes(normalized)) {
+    addOption(normalized);
+  }
+
+  selectEl.innerHTML = '';
+  fragments.forEach(opt => selectEl.appendChild(opt));
+
+  const values = Array.from(selectEl.options).map(opt => opt.value);
+  let selection = normalized;
+  if (!selection || !values.includes(selection)) {
+    if (preferDefault) {
+      selection = getDefaultPriorityValue();
+    } else if (values.includes('')) {
+      selection = '';
+    } else {
+      selection = getDefaultPriorityValue();
+    }
+  }
+  if (!values.includes(selection)) {
+    selection = values[0] || '';
+  }
+  selectEl.value = selection;
+}
+
+function openEdit(no) {
+  const task = TASKS.find(t => t.No === no);
+  if (!task) return;
+  CURRENT_EDIT = no;
+  openModal(task, { mode: 'edit' });
+}
+
+function openModal(task, { mode }) {
+  const modal = document.getElementById('modal');
+  if (!modal) return;
+  const title = document.getElementById('modal-title');
+  const fno = document.getElementById('f-no');
+  const fstat = document.getElementById('f-status');
+  const fmajor = document.getElementById('f-major');
+  const fminor = document.getElementById('f-minor');
+  const fttl = document.getElementById('f-title');
+  const fwho = document.getElementById('f-assignee');
+  const fprio = document.getElementById('f-priority');
+  const fdue = document.getElementById('f-due');
+  const fnote = document.getElementById('f-notes');
+  const btnDelete = document.getElementById('btn-delete');
+
+  title.textContent = mode === 'create' ? 'タスク追加' : 'タスク編集';
+
+  const statuses = Array.isArray(STATUSES) ? STATUSES : [];
+  const seen = new Set();
+  fstat.innerHTML = '';
+  statuses.forEach(status => {
+    const normalized = normalizeStatusLabel(status);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    const opt = document.createElement('option');
+    opt.value = normalized;
+    opt.textContent = normalized;
+    fstat.appendChild(opt);
+  });
+  if (!seen.has(UNSET_STATUS_LABEL)) {
+    const opt = document.createElement('option');
+    opt.value = UNSET_STATUS_LABEL;
+    opt.textContent = UNSET_STATUS_LABEL;
+    fstat.appendChild(opt);
+  }
+
+  fno.value = task.No ?? '';
+  fstat.value = normalizeStatusLabel(task.ステータス);
+  if (!Array.from(fstat.options).some(opt => opt.value === fstat.value)) {
+    const opt = document.createElement('option');
+    opt.value = fstat.value;
+    opt.textContent = fstat.value;
+    fstat.appendChild(opt);
+  }
+  fstat.value = normalizeStatusLabel(task.ステータス);
+
+  if (fmajor) fmajor.value = task.大分類 || '';
+  if (fminor) fminor.value = task.中分類 || '';
+  fttl.value = task.タスク || '';
+  fwho.value = task.担当者 || '';
+  applyPriorityOptions(fprio, task.優先度, mode === 'create');
+  fdue.value = (task.期限 || '').slice(0, 10);
+  fnote.value = task.備考 || '';
+
+  btnDelete.style.display = mode === 'edit' ? 'inline-flex' : 'none';
+
+  document.getElementById('btn-close').onclick = closeModal;
+  document.getElementById('btn-cancel').onclick = closeModal;
+
+  btnDelete.onclick = async () => {
+    if (!CURRENT_EDIT) return;
+    if (!confirm('削除しますか？')) return;
+    try {
+      const ok = await api.delete_task(CURRENT_EDIT);
+      if (ok) {
+        if (typeof api.get_tasks === 'function') {
+          TASKS = sanitizeTaskList(await api.get_tasks());
+        } else {
+          const remaining = TASKS
+            .filter(x => x.No !== CURRENT_EDIT)
+            .map((record, idx) => ({ ...record, No: idx + 1 }));
+          TASKS = sanitizeTaskList(remaining);
+        }
+        CURRENT_EDIT = null;
+        ensureRangeDefaults();
+        closeModal();
+        renderSummary();
+        renderLegend();
+        renderAssigneeFilter();
+        renderTimeline();
+      } else {
+        alert('削除できませんでした');
+      }
+    } catch (err) {
+      alert('削除に失敗: ' + (err?.message || err));
+    }
+  };
+
+  const form = document.getElementById('task-form');
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const payload = {
+      ステータス: denormalizeStatusLabel(fstat.value),
+      大分類: fmajor ? fmajor.value.trim() : '',
+      中分類: fminor ? fminor.value.trim() : '',
+      タスク: fttl.value.trim(),
+      担当者: fwho.value.trim(),
+      優先度: (fprio.value ?? '').trim(),
+      期限: fdue.value ? fdue.value : '',
+      備考: fnote.value
+    };
+
+    if (!payload.タスク) {
+      alert('タスクを入力してください。');
+      fttl.focus();
+      return;
+    }
+
+    try {
+      if (mode === 'create') {
+        const created = await api.add_task(payload);
+        const sanitized = sanitizeTaskRecord(created, TASKS.length);
+        if (sanitized) {
+          TASKS.push(sanitized);
+        }
+      } else {
+        const no = CURRENT_EDIT;
+        const updated = await api.update_task(no, payload);
+        const idx = TASKS.findIndex(x => x.No === no);
+        if (idx >= 0) {
+          const sanitized = sanitizeTaskRecord(updated, idx);
+          if (sanitized) {
+            TASKS[idx] = sanitized;
+          } else {
+            TASKS.splice(idx, 1);
+          }
+        }
+      }
+      CURRENT_EDIT = null;
+      closeModal();
+      ensureRangeDefaults();
+      renderSummary();
+      renderLegend();
+      renderAssigneeFilter();
+      renderTimeline();
+    } catch (err) {
+      alert('保存に失敗: ' + (err?.message || err));
+    }
+  };
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal() {
+  const modal = document.getElementById('modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
 }

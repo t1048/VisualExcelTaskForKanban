@@ -81,6 +81,18 @@
       border-color: transparent;
     }
 
+    .btn-success {
+      background: linear-gradient(135deg, #0e9f6e, #22c55e);
+      color: #f8fafc;
+      border-color: transparent;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #f97316);
+      color: #f8fafc;
+      border-color: transparent;
+    }
+
     .btn-ghost {
       background: transparent;
       border-color: rgba(148, 163, 184, 0.4);
@@ -161,6 +173,84 @@
     .summary {
       font-size: 13px;
       color: var(--muted);
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, 0.78);
+      backdrop-filter: blur(6px);
+      z-index: 200;
+    }
+
+    .modal.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(680px, calc(100% - 24px));
+      background: var(--panel);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .form {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px 16px;
+    }
+
+    .form .row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .form input,
+    .form textarea,
+    .form select {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 10px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
     }
 
     .timeline-wrapper {
@@ -351,6 +441,7 @@
   <div class="toolbar">
     <div class="title">担当者タイムライン</div>
     <div class="toolbar-spacer"></div>
+    <button id="btn-save" class="btn btn-success">Excelへ保存</button>
     <a href="index.html" class="btn btn-ghost">カンバン表示へ</a>
     <a href="list.html" class="btn btn-ghost">リスト表示へ</a>
   </div>
@@ -391,6 +482,56 @@
       </div>
     </section>
   </main>
+
+  <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">タスク編集</div>
+        <button id="btn-close" class="btn btn-ghost">✕</button>
+      </div>
+      <form id="task-form" class="form">
+        <input type="hidden" id="f-no" />
+        <div class="row">
+          <label for="f-status">ステータス</label>
+          <select id="f-status"></select>
+        </div>
+        <div class="row">
+          <label for="f-major">大分類</label>
+          <input type="text" id="f-major" />
+        </div>
+        <div class="row">
+          <label for="f-minor">中分類</label>
+          <input type="text" id="f-minor" />
+        </div>
+        <div class="row">
+          <label for="f-priority">優先度</label>
+          <select id="f-priority"></select>
+        </div>
+        <div class="row">
+          <label for="f-assignee">担当者</label>
+          <input type="text" id="f-assignee" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-title">タスク</label>
+          <input type="text" id="f-title" required />
+        </div>
+        <div class="row">
+          <label for="f-due">期限</label>
+          <input type="date" id="f-due" />
+        </div>
+        <div class="row" style="grid-column: 1/-1;">
+          <label for="f-notes">備考</label>
+          <textarea id="f-notes"></textarea>
+        </div>
+        <div class="modal-actions" id="modal-actions">
+          <button type="button" id="btn-delete" class="btn btn-danger">削除</button>
+          <span style="flex:1"></span>
+          <button type="button" id="btn-cancel" class="btn">キャンセル</button>
+          <button type="submit" class="btn btn-success">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
     <script src="../scripts/timeline.js"></script>
 </body>
