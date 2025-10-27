@@ -2,6 +2,9 @@ let api;
 let RUN_MODE = 'mock';
 let TASKS = [];
 let STATUSES = [];
+const ASSIGNEE_FILTER_ALL = '';
+const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
+const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 
 window.addEventListener('pywebviewready', async () => {
   try {
@@ -174,13 +177,18 @@ function renderAssigneeFilter() {
   if (!select) return;
 
   const previous = select.value;
-  const assignees = collectAllAssignees();
+  const assignees = collectAllAssignees().filter(name => name !== ASSIGNEE_UNASSIGNED_LABEL);
   select.innerHTML = '';
 
   const optionAll = document.createElement('option');
-  optionAll.value = '';
+  optionAll.value = ASSIGNEE_FILTER_ALL;
   optionAll.textContent = 'すべて';
   select.appendChild(optionAll);
+
+  const optionUnassigned = document.createElement('option');
+  optionUnassigned.value = ASSIGNEE_FILTER_UNASSIGNED;
+  optionUnassigned.textContent = ASSIGNEE_UNASSIGNED_LABEL;
+  select.appendChild(optionUnassigned);
 
   assignees.forEach(name => {
     const option = document.createElement('option');
@@ -189,10 +197,12 @@ function renderAssigneeFilter() {
     select.appendChild(option);
   });
 
-  if (previous && assignees.includes(previous)) {
+  if (previous === ASSIGNEE_FILTER_UNASSIGNED) {
+    select.value = ASSIGNEE_FILTER_UNASSIGNED;
+  } else if (previous && assignees.includes(previous)) {
     select.value = previous;
   } else {
-    select.value = '';
+    select.value = ASSIGNEE_FILTER_ALL;
   }
 }
 
@@ -236,7 +246,8 @@ function renderTimeline() {
   const wrapper = document.getElementById('timeline-wrapper');
   const from = parseISO(document.getElementById('date-from').value);
   const to = parseISO(document.getElementById('date-to').value);
-  const assigneeFilter = document.getElementById('assignee-filter')?.value || '';
+  const assigneeSelect = document.getElementById('assignee-filter');
+  const assigneeFilter = assigneeSelect ? assigneeSelect.value : ASSIGNEE_FILTER_ALL;
   if (!from || !to || from > to) {
     wrapper.innerHTML = '<div class="message">期間の指定が正しくありません。</div>';
     return;
@@ -249,7 +260,14 @@ function renderTimeline() {
   }
 
   const assignees = collectAssignees(from, to);
-  const filteredAssignees = assigneeFilter ? assignees.filter(name => name === assigneeFilter) : assignees;
+  let filteredAssignees;
+  if (assigneeFilter === ASSIGNEE_FILTER_UNASSIGNED) {
+    filteredAssignees = assignees.includes(ASSIGNEE_UNASSIGNED_LABEL) ? [ASSIGNEE_UNASSIGNED_LABEL] : [];
+  } else if (assigneeFilter) {
+    filteredAssignees = assignees.filter(name => name === assigneeFilter);
+  } else {
+    filteredAssignees = assignees;
+  }
   if (!filteredAssignees.length) {
     if (assigneeFilter) {
       wrapper.innerHTML = '<div class="message">選択した担当者のタスクが表示期間内にありません。</div>';
@@ -356,15 +374,19 @@ function renderTaskChip(task) {
   return div;
 }
 
-function buildTaskLookup(from, to, assigneeFilter = '') {
+function buildTaskLookup(from, to, assigneeFilter = ASSIGNEE_FILTER_ALL) {
   const map = new Map();
   TASKS.forEach(task => {
     const due = parseISO(task.期限);
     if (!due || due < from || due > to) return;
-    const assignee = task.担当者?.trim() || '（担当者未設定）';
-    if (assigneeFilter && assignee !== assigneeFilter) return;
-    if (!map.has(assignee)) map.set(assignee, new Map());
-    const byDate = map.get(assignee);
+    const name = task.担当者?.trim() || ASSIGNEE_UNASSIGNED_LABEL;
+    if (assigneeFilter === ASSIGNEE_FILTER_UNASSIGNED) {
+      if (name !== ASSIGNEE_UNASSIGNED_LABEL) return;
+    } else if (assigneeFilter && name !== assigneeFilter) {
+      return;
+    }
+    if (!map.has(name)) map.set(name, new Map());
+    const byDate = map.get(name);
     const key = toISODate(due);
     if (!byDate.has(key)) byDate.set(key, []);
     byDate.get(key).push(task);
@@ -388,7 +410,7 @@ function collectAssignees(rangeFrom, rangeTo) {
     const due = parseISO(task.期限);
     if (!due) return;
     if (!rangeFrom || !rangeTo || due < rangeFrom || due > rangeTo) return;
-    assignees.add(task.担当者?.trim() || '（担当者未設定）');
+    assignees.add(task.担当者?.trim() || ASSIGNEE_UNASSIGNED_LABEL);
   });
   return Array.from(assignees).sort((a, b) => a.localeCompare(b, 'ja'));
 }
@@ -396,7 +418,7 @@ function collectAssignees(rangeFrom, rangeTo) {
 function collectAllAssignees() {
   const assignees = new Set();
   TASKS.forEach(task => {
-    assignees.add(task.担当者?.trim() || '（担当者未設定）');
+    assignees.add(task.担当者?.trim() || ASSIGNEE_UNASSIGNED_LABEL);
   });
   return Array.from(assignees).sort((a, b) => a.localeCompare(b, 'ja'));
 }

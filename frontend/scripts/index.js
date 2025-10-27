@@ -181,9 +181,12 @@ ready(async () => {
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "タスク", "担当者", "優先度", "期限", "備考"];
 const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
+const ASSIGNEE_FILTER_ALL = '__ALL__';
+const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
+const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 let STATUSES = [];
 let FILTERS = {
-  assignee: '__ALL__',
+  assignee: ASSIGNEE_FILTER_ALL,
   statuses: new Set(),              // 初期化時に全ONにする
   keyword: '',
   date: { mode: 'none', from: '', to: '' }
@@ -435,9 +438,18 @@ function buildFiltersUI() {
   const sel = document.getElementById('flt-assignee');
   const selected = FILTERS.assignee;
   const list = uniqAssignees();
-  sel.innerHTML = '<option value="__ALL__">（全員）</option>' +
-    list.map(a => `<option value="${a}">${a}</option>`).join('');
-  sel.value = list.includes(selected) ? selected : '__ALL__';
+  const options = [
+    `<option value="${ASSIGNEE_FILTER_ALL}">（全員）</option>`,
+    `<option value="${ASSIGNEE_FILTER_UNASSIGNED}">${ASSIGNEE_UNASSIGNED_LABEL}</option>`
+  ].concat(list.map(a => `<option value="${a}">${a}</option>`));
+  sel.innerHTML = options.join('');
+  if (selected === ASSIGNEE_FILTER_UNASSIGNED) {
+    sel.value = ASSIGNEE_FILTER_UNASSIGNED;
+  } else if (list.includes(selected)) {
+    sel.value = selected;
+  } else {
+    sel.value = ASSIGNEE_FILTER_ALL;
+  }
   sel.onchange = () => { FILTERS.assignee = sel.value; renderBoard(); };
 
   // キーワード
@@ -487,7 +499,7 @@ function buildFiltersUI() {
 
   // 解除ボタン
   document.getElementById('btn-clear-filters').onclick = () => {
-    FILTERS = { assignee: '__ALL__', statuses: new Set(STATUSES), keyword: '', date: { mode: 'none', from: '', to: '' } };
+    FILTERS = { assignee: ASSIGNEE_FILTER_ALL, statuses: new Set(STATUSES), keyword: '', date: { mode: 'none', from: '', to: '' } };
     buildFiltersUI();
     renderBoard();
   };
@@ -823,8 +835,11 @@ function getFilteredTasks() {
 
   return TASKS.filter(t => {
     // 担当者
-    if (assignee !== '__ALL__') {
-      if ((t.担当者 || '') !== assignee) return false;
+    const who = String(t.担当者 ?? '').trim();
+    if (assignee === ASSIGNEE_FILTER_UNASSIGNED) {
+      if (who) return false;
+    } else if (assignee !== ASSIGNEE_FILTER_ALL) {
+      if (who !== assignee) return false;
     }
     // ステータス
     if (!statuses.has(t.ステータス)) return false;
