@@ -2,6 +2,7 @@
 let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
 let WIRED = false;        // ツールバー多重バインド防止
+const PRIORITY_DEFAULT_OPTIONS = ['高', '中', '低'];
 
 function createMockApi() {
   const baseStatuses = ['未着手', '進行中', '完了', '保留'];
@@ -33,7 +34,8 @@ function createMockApi() {
   let validations = {
     'ステータス': Array.from(statusSet),
     '大分類': Array.from(new Set(majorCategories)),
-    '中分類': Array.from(new Set(minorCategories))
+    '中分類': Array.from(new Set(minorCategories)),
+    '優先度': [...PRIORITY_DEFAULT_OPTIONS]
   };
 
   const cloneTask = task => ({ ...task });
@@ -92,8 +94,19 @@ function createMockApi() {
   };
 
   const updateValidations = (payload) => {
+    const withFallbacks = (source) => {
+      const merged = { ...source };
+      if (!Array.isArray(merged['ステータス']) || merged['ステータス'].length === 0) {
+        merged['ステータス'] = Array.from(statusSet);
+      }
+      if (!Array.isArray(merged['優先度']) || merged['優先度'].length === 0) {
+        merged['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
+      }
+      return merged;
+    };
+
     if (!payload || typeof payload !== 'object') {
-      validations = { 'ステータス': Array.from(statusSet) };
+      validations = withFallbacks({});
       return validations;
     }
     const cleaned = {};
@@ -109,9 +122,9 @@ function createMockApi() {
       });
       if (values.length > 0) cleaned[key] = values;
     });
-    validations = cleaned;
-    if (Array.isArray(cleaned['ステータス'])) {
-      cleaned['ステータス'].forEach(v => statusSet.add(v));
+    validations = withFallbacks(cleaned);
+    if (Array.isArray(validations['ステータス'])) {
+      validations['ステータス'].forEach(v => statusSet.add(v));
     }
     return validations;
   };
@@ -326,9 +339,16 @@ function applyValidationState(raw) {
       }
     });
   }
-  VALIDATIONS = next;
+  const merged = { ...next };
+  if (!Array.isArray(merged['ステータス']) || merged['ステータス'].length === 0) {
+    merged['ステータス'] = [...DEFAULT_STATUSES];
+  }
+  if (!Array.isArray(merged['優先度']) || merged['優先度'].length === 0) {
+    merged['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
+  }
+  VALIDATIONS = merged;
 
-  const validatedStatuses = next['ステータス'] || [];
+  const validatedStatuses = VALIDATIONS['ステータス'] || [];
   if (validatedStatuses.length > 0) {
     const extras = Array.isArray(STATUSES) ? STATUSES.filter(s => !validatedStatuses.includes(s)) : [];
     STATUSES = [...validatedStatuses, ...extras];
@@ -377,6 +397,75 @@ function applyValidationState(raw) {
   }
 
   STATUSES = ordered;
+}
+
+function getPriorityOptions() {
+  const raw = Array.isArray(VALIDATIONS['優先度']) ? VALIDATIONS['優先度'] : [];
+  const base = raw.length > 0 ? raw : PRIORITY_DEFAULT_OPTIONS;
+  const seen = new Set();
+  const list = [];
+  base.forEach(value => {
+    const text = String(value ?? '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    list.push(text);
+  });
+  if (list.length === 0) {
+    PRIORITY_DEFAULT_OPTIONS.forEach(value => {
+      if (seen.has(value)) return;
+      seen.add(value);
+      list.push(value);
+    });
+  }
+  return list;
+}
+
+function getDefaultPriorityValue() {
+  const options = getPriorityOptions();
+  if (options.includes('中')) return '中';
+  return options[0] || '';
+}
+
+function applyPriorityOptions(selectEl, currentValue, preferDefault = false) {
+  if (!selectEl) return;
+  const normalized = currentValue === null || currentValue === undefined
+    ? ''
+    : String(currentValue).trim();
+  const options = getPriorityOptions();
+  const optionElements = [];
+  const addOption = (value, label = value) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    optionElements.push(opt);
+  };
+
+  if (!normalized && !preferDefault) {
+    addOption('', '（未設定）');
+  }
+  options.forEach(value => addOption(value));
+  if (normalized && !options.includes(normalized)) {
+    addOption(normalized);
+  }
+
+  selectEl.innerHTML = '';
+  optionElements.forEach(opt => selectEl.appendChild(opt));
+
+  const optionValues = Array.from(selectEl.options).map(opt => opt.value);
+  let selection = normalized;
+  if (!selection || !optionValues.includes(selection)) {
+    if (preferDefault) {
+      selection = getDefaultPriorityValue();
+    } else if (optionValues.includes('')) {
+      selection = '';
+    } else {
+      selection = getDefaultPriorityValue();
+    }
+  }
+  if (!optionValues.includes(selection)) {
+    selection = optionValues[0] || '';
+  }
+  selectEl.value = selection;
 }
 
 function syncFilterStatuses(prevSelection) {
@@ -818,19 +907,11 @@ function updateDueIndicators(tasks) {
     }
   });
 
-  if (overdue > 0) {
-    overdueEl.hidden = false;
-    overdueEl.querySelector('.count').textContent = overdue;
-  } else {
-    overdueEl.hidden = true;
-  }
+  overdueEl.querySelector('.count').textContent = overdue;
+  overdueEl.hidden = overdue === 0;
 
-  if (warning > 0) {
-    warningEl.hidden = false;
-    warningEl.querySelector('.count').textContent = warning;
-  } else {
-    warningEl.hidden = true;
-  }
+  warningEl.querySelector('.count').textContent = warning;
+  warningEl.hidden = warning === 0;
 
   if (overdue > 0) {
     toastEl.hidden = false;
@@ -1108,7 +1189,7 @@ function openCreate() {
     中分類: '',
     タスク: '',
     担当者: '',
-    優先度: '',
+    優先度: getDefaultPriorityValue(),
     期限: '',
     備考: ''
   }, { mode: 'create' });
@@ -1150,7 +1231,7 @@ function openModal(task, { mode }) {
   if (fminor) fminor.value = task.中分類 || '';
   fttl.value = task.タスク || '';
   fwho.value = task.担当者 || '';
-  fprio.value = task.優先度 !== undefined && task.優先度 !== null ? String(task.優先度) : '';
+  applyPriorityOptions(fprio, task.優先度, mode === 'create');
   fdue.value = (task.期限 || '').slice(0, 10);
   fnote.value = task.備考 || '';
 
@@ -1192,7 +1273,7 @@ function openModal(task, { mode }) {
       中分類: fminor ? fminor.value.trim() : '',
       タスク: fttl.value.trim(),
       担当者: fwho.value.trim(),
-      優先度: fprio.value.trim(),
+      優先度: (fprio.value ?? '').trim(),
       期限: fdue.value ? fdue.value : '',
       備考: fnote.value
     };
