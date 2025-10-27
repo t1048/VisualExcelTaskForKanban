@@ -48,9 +48,9 @@ def _to_iso_date_str(value) -> str:
     if pd.isna(value):
         return ""
     if isinstance(value, (dt.date, dt.datetime, pd.Timestamp)):
-        return pd.to_datetime(value).strftime("%Y/%m/%d")
+        return pd.to_datetime(value).strftime("%Y-%m-%d")
     try:
-        return pd.to_datetime(str(value)).strftime("%Y/%m/%d")
+        return pd.to_datetime(str(value)).strftime("%Y-%m-%d")
     except Exception:
         return str(value)
 
