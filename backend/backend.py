@@ -37,6 +37,11 @@ TASK_COLUMNS = [
     "備考",
 ]
 DEFAULT_STATUSES = ["未着手", "進行中", "完了", "保留"]
+DEFAULT_PRIORITY_LEVELS = ["高", "中", "低"]
+DEFAULT_VALIDATIONS: Dict[str, List[str]] = {
+    "ステータス": list(DEFAULT_STATUSES),
+    "優先度": list(DEFAULT_PRIORITY_LEVELS),
+}
 
 
 def _to_iso_date_str(value) -> str:
@@ -106,7 +111,9 @@ class TaskStore:
             sheet_name.strip() if isinstance(sheet_name, str) and sheet_name.strip() else None
         )
         self._sheet_name: str | None = self._requested_sheet_name
-        self._validations: Dict[str, List[str]] = {}
+        self._validations: Dict[str, List[str]] = {
+            key: list(values) for key, values in DEFAULT_VALIDATIONS.items()
+        }
         self._last_saved_at: Optional[dt.datetime] = None
         self._last_saved_mtime: Optional[float] = None
         self._last_loaded_mtime: Optional[float] = None
@@ -136,7 +143,15 @@ class TaskStore:
                 sheet_name = wb.sheetnames[0]
             ws = wb[sheet_name]
             self._sheet_name = sheet_name
-            self._validations = self._extract_validations(wb, ws)
+            extracted = self._extract_validations(wb, ws)
+            validations: Dict[str, List[str]] = {
+                key: list(values) for key, values in DEFAULT_VALIDATIONS.items()
+            }
+            for column, values in extracted.items():
+                if not values:
+                    continue
+                validations[column] = list(values)
+            self._validations = validations
 
             df = pd.read_excel(
                 self.excel_path,
@@ -319,9 +334,13 @@ class TaskStore:
                         values.append(text)
                 if values:
                     cleaned[col] = values
-            self._validations = cleaned
-            if cleaned.get("ステータス"):
-                base = list(cleaned["ステータス"])
+            merged: Dict[str, List[str]] = {
+                key: list(values) for key, values in DEFAULT_VALIDATIONS.items()
+            }
+            merged.update(cleaned)
+            self._validations = merged
+            if self._validations.get("ステータス"):
+                base = list(self._validations["ステータス"])
                 extras = [
                     s
                     for s in self._df["ステータス"].dropna().astype(str).tolist()
