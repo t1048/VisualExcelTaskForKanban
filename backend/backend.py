@@ -28,6 +28,8 @@ except ImportError:  # pragma: no cover - optional dependency guard
 
 TASK_COLUMNS = [
     "ステータス",
+    "大分類",
+    "中分類",
     "タスク",
     "担当者",
     "優先度",
@@ -328,6 +330,8 @@ class TaskStore:
         return {
             "No": int(idx + 1),
             "ステータス": "" if pd.isna(row["ステータス"]) else str(row["ステータス"]),
+            "大分類": "" if pd.isna(row["大分類"]) else str(row["大分類"]),
+            "中分類": "" if pd.isna(row["中分類"]) else str(row["中分類"]),
             "タスク": "" if pd.isna(row["タスク"]) else str(row["タスク"]),
             "担当者": "" if pd.isna(row["担当者"]) else str(row["担当者"]),
             "優先度": _format_priority(row["優先度"]),
@@ -354,6 +358,8 @@ class TaskStore:
             task = dict(payload)
 
             status = str(task.get("ステータス", "") or "").strip()
+            major = str(task.get("大分類", "") or "").strip()
+            minor = str(task.get("中分類", "") or "").strip()
             title = str(task.get("タスク", "") or "").strip()
             assignee = str(task.get("担当者", "") or "").strip()
             notes = str(task.get("備考", "") or "")
@@ -362,6 +368,8 @@ class TaskStore:
 
             row = {
                 "ステータス": status,
+                "大分類": major,
+                "中分類": minor,
                 "タスク": title,
                 "担当者": assignee,
                 "優先度": priority,
@@ -382,6 +390,10 @@ class TaskStore:
                 status = str(patch["ステータス"] or "").strip()
                 self._ensure_status_registered(status)
                 self._df.at[row_index, "ステータス"] = status
+            if "大分類" in patch:
+                self._df.at[row_index, "大分類"] = str(patch["大分類"] or "").strip()
+            if "中分類" in patch:
+                self._df.at[row_index, "中分類"] = str(patch["中分類"] or "").strip()
             if "タスク" in patch:
                 self._df.at[row_index, "タスク"] = str(patch["タスク"] or "").strip()
             if "担当者" in patch:
