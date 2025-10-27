@@ -410,11 +410,11 @@ class TaskStore:
     def save_excel(self) -> str:
         with self._lock:
             ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-            tmp_path = self.excel_path.with_name(
-                f"{self.excel_path.stem}.tmp_{ts}{self.excel_path.suffix}"
-            )
             backup_path = self.excel_path.with_name(
                 f"{self.excel_path.stem}.bak_{ts}{self.excel_path.suffix}"
+            )
+            tmp_path = self.excel_path.with_name(
+                f"{self.excel_path.stem}.tmp_{ts}{self.excel_path.suffix}"
             )
 
             df = self._df.copy()
@@ -460,9 +460,8 @@ class TaskStore:
                     ws.add_data_validation(dv)
 
                 wb.save(tmp_path)
-                if self.excel_path.exists():
-                    shutil.copy2(self.excel_path, backup_path)
                 os.replace(tmp_path, self.excel_path)
+                shutil.copy2(self.excel_path, backup_path)
                 self._last_saved_at = dt.datetime.now()
                 self._last_saved_mtime = self._get_file_mtime()
                 self._last_loaded_mtime = self._last_saved_mtime
