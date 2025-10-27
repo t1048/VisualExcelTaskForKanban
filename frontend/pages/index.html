@@ -195,6 +195,25 @@
       font-weight: 600;
     }
 
+    .card-category {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .badge-major {
+      color: #bfdbfe;
+      background: rgba(59, 130, 246, 0.18);
+      border-color: rgba(59, 130, 246, 0.35);
+    }
+
+    .badge-minor {
+      color: #bbf7d0;
+      background: rgba(16, 185, 129, 0.18);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+
     .badge {
       font-size: 11px;
       padding: 3px 8px;
@@ -515,6 +534,20 @@
       </select>
     </div>
 
+    <div class="filter">
+      <label for="flt-major">大分類</label>
+      <select id="flt-major">
+        <option value="__CATEGORY_ALL__">（すべて）</option>
+      </select>
+    </div>
+
+    <div class="filter">
+      <label for="flt-minor">中分類</label>
+      <select id="flt-minor" disabled>
+        <option value="__CATEGORY_MINOR_ALL__">（すべて）</option>
+      </select>
+    </div>
+
     <div class="filter" style="min-width:260px;flex:1;">
       <label>ステータス</label>
       <div class="status-checks" id="flt-statuses"></div>
@@ -580,6 +613,14 @@
         <div class="row">
           <label for="f-status">ステータス</label>
           <select id="f-status"></select>
+        </div>
+        <div class="row">
+          <label for="f-major">大分類</label>
+          <input type="text" id="f-major" />
+        </div>
+        <div class="row">
+          <label for="f-minor">中分類</label>
+          <input type="text" id="f-minor" />
         </div>
         <div class="row">
           <label for="f-priority">優先度</label>

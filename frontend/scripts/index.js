@@ -9,13 +9,19 @@ function createMockApi() {
   const pad = n => String(n).padStart(2, '0');
   const toISO = date => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   const today = new Date();
+  const majorCategories = ['プロジェクトA', 'プロジェクトB', 'プロジェクトC'];
+  const minorCategories = ['企画', '設計', '実装', '検証'];
   const sampleTasks = Array.from({ length: 8 }).map((_, idx) => {
     const due = new Date(today);
     due.setDate(today.getDate() + idx - 2);
     const status = baseStatuses[idx % baseStatuses.length];
     statusSet.add(status);
+    const major = majorCategories[idx % majorCategories.length];
+    const minor = minorCategories[idx % minorCategories.length];
     return {
       ステータス: status,
+      大分類: major,
+      中分類: minor,
       タスク: `サンプルタスク ${idx + 1}`,
       担当者: ['田中', '佐藤', '鈴木', '高橋'][idx % 4],
       優先度: ['高', '中', '低'][idx % 3],
@@ -24,7 +30,11 @@ function createMockApi() {
     };
   });
   const tasks = [...sampleTasks];
-  let validations = { 'ステータス': Array.from(statusSet) };
+  let validations = {
+    'ステータス': Array.from(statusSet),
+    '大分類': Array.from(new Set(majorCategories)),
+    '中分類': Array.from(new Set(minorCategories))
+  };
 
   const cloneTask = task => ({ ...task });
 
@@ -51,8 +61,13 @@ function createMockApi() {
     const status = sanitizeStatus(payload?.ステータス);
     statusSet.add(status);
 
+    const major = String(payload?.大分類 ?? '').trim();
+    const minor = String(payload?.中分類 ?? '').trim();
+
     return {
       ステータス: status,
+      大分類: major,
+      中分類: minor,
       タスク: String(payload?.タスク ?? '').trim(),
       担当者: String(payload?.担当者 ?? '').trim(),
       優先度: normalizePriority(payload?.優先度),
@@ -179,17 +194,20 @@ ready(async () => {
 });
 
 /* ===================== 状態 ===================== */
-const VALIDATION_COLUMNS = ["ステータス", "タスク", "担当者", "優先度", "期限", "備考"];
+const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
 const ASSIGNEE_FILTER_ALL = '__ALL__';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
+const CATEGORY_FILTER_ALL = '__CATEGORY_ALL__';
+const CATEGORY_FILTER_MINOR_ALL = '__CATEGORY_MINOR_ALL__';
 let STATUSES = [];
 let FILTERS = {
   assignee: ASSIGNEE_FILTER_ALL,
   statuses: new Set(),              // 初期化時に全ONにする
   keyword: '',
-  date: { mode: 'none', from: '', to: '' }
+  date: { mode: 'none', from: '', to: '' },
+  category: { major: CATEGORY_FILTER_ALL, minor: CATEGORY_FILTER_MINOR_ALL }
 };
 let TASKS = [];
 let CURRENT_EDIT = null;
@@ -412,6 +430,30 @@ function uniqAssignees() {
   return Array.from(set).sort((a, b) => a.localeCompare(b, 'ja'));
 }
 
+function collectCategoryOptions() {
+  const majorMap = new Map();
+  TASKS.forEach(task => {
+    const major = String(task?.大分類 ?? '').trim();
+    const minor = String(task?.中分類 ?? '').trim();
+    if (!major) return;
+    if (!majorMap.has(major)) {
+      majorMap.set(major, new Set());
+    }
+    if (minor) {
+      majorMap.get(major).add(minor);
+    }
+  });
+
+  const majorList = Array.from(majorMap.keys()).sort((a, b) => a.localeCompare(b, 'ja'));
+  const minorMap = new Map();
+  majorList.forEach(major => {
+    const minors = majorMap.get(major) ?? new Set();
+    minorMap.set(major, Array.from(minors).sort((a, b) => a.localeCompare(b, 'ja')));
+  });
+
+  return { majorList, minorMap };
+}
+
 function buildFiltersUI() {
   // ステータス（チェックボックス）
   const wrap = document.getElementById('flt-statuses');
@@ -433,6 +475,67 @@ function buildFiltersUI() {
     lbl.appendChild(cb); lbl.appendChild(span);
     wrap.appendChild(lbl);
   });
+
+  // 大分類・中分類
+  const majorSel = document.getElementById('flt-major');
+  const minorSel = document.getElementById('flt-minor');
+  if (majorSel && minorSel) {
+    const { majorList, minorMap } = collectCategoryOptions();
+    let currentMajor = FILTERS.category?.major ?? CATEGORY_FILTER_ALL;
+    let currentMinor = FILTERS.category?.minor ?? CATEGORY_FILTER_MINOR_ALL;
+
+    if (!majorList.includes(currentMajor)) {
+      currentMajor = CATEGORY_FILTER_ALL;
+      FILTERS.category.major = CATEGORY_FILTER_ALL;
+    }
+
+    const majorOptions = [
+      `<option value="${CATEGORY_FILTER_ALL}">（すべて）</option>`
+    ].concat(majorList.map(name => `<option value="${name}">${name}</option>`));
+    majorSel.innerHTML = majorOptions.join('');
+    majorSel.value = currentMajor;
+
+    const renderMinorOptions = () => {
+      const majorsMinors = minorMap.get(currentMajor) || [];
+      const minorOptions = [
+        `<option value="${CATEGORY_FILTER_MINOR_ALL}">（すべて）</option>`
+      ].concat(majorsMinors.map(name => `<option value="${name}">${name}</option>`));
+      minorSel.innerHTML = minorOptions.join('');
+
+      if (currentMajor === CATEGORY_FILTER_ALL || majorsMinors.length === 0) {
+        minorSel.disabled = true;
+        currentMinor = CATEGORY_FILTER_MINOR_ALL;
+        minorSel.value = CATEGORY_FILTER_MINOR_ALL;
+        FILTERS.category.minor = CATEGORY_FILTER_MINOR_ALL;
+      } else {
+        minorSel.disabled = false;
+        if (majorsMinors.includes(currentMinor)) {
+          minorSel.value = currentMinor;
+        } else {
+          currentMinor = CATEGORY_FILTER_MINOR_ALL;
+          minorSel.value = CATEGORY_FILTER_MINOR_ALL;
+        }
+        FILTERS.category.minor = currentMinor;
+      }
+    };
+
+    renderMinorOptions();
+
+    majorSel.onchange = () => {
+      currentMajor = majorSel.value;
+      FILTERS.category.major = currentMajor;
+      currentMinor = CATEGORY_FILTER_MINOR_ALL;
+      FILTERS.category.minor = currentMinor;
+      renderMinorOptions();
+      renderBoard();
+    };
+
+    minorSel.onchange = () => {
+      currentMinor = minorSel.value;
+      FILTERS.category.minor = currentMinor;
+      renderBoard();
+    };
+  }
 
   // 担当者（セレクト）
   const sel = document.getElementById('flt-assignee');
@@ -499,7 +602,13 @@ function buildFiltersUI() {
 
   // 解除ボタン
   document.getElementById('btn-clear-filters').onclick = () => {
-    FILTERS = { assignee: ASSIGNEE_FILTER_ALL, statuses: new Set(STATUSES), keyword: '', date: { mode: 'none', from: '', to: '' } };
+    FILTERS = {
+      assignee: ASSIGNEE_FILTER_ALL,
+      statuses: new Set(STATUSES),
+      keyword: '',
+      date: { mode: 'none', from: '', to: '' },
+      category: { major: CATEGORY_FILTER_ALL, minor: CATEGORY_FILTER_MINOR_ALL }
+    };
     buildFiltersUI();
     renderBoard();
   };
@@ -559,6 +668,24 @@ function renderCard(task) {
 
   el.addEventListener('dblclick', () => openEdit(task.No));
 
+  const category = document.createElement('div');
+  category.className = 'card-category';
+  let hasCategory = false;
+  if (task.大分類) {
+    const major = document.createElement('span');
+    major.className = 'badge badge-major';
+    major.textContent = task.大分類;
+    category.appendChild(major);
+    hasCategory = true;
+  }
+  if (task.中分類) {
+    const minor = document.createElement('span');
+    minor.className = 'badge badge-minor';
+    minor.textContent = task.中分類;
+    category.appendChild(minor);
+    hasCategory = true;
+  }
+
   const header = document.createElement('div');
   header.className = 'card-header';
   const title = document.createElement('div');
@@ -570,6 +697,9 @@ function renderCard(task) {
   header.appendChild(title);
   header.appendChild(no);
 
+  if (hasCategory) {
+    el.appendChild(category);
+  }
   const meta = document.createElement('div');
   meta.className = 'card-meta';
   if (task.優先度 !== undefined && task.優先度 !== null && String(task.優先度).trim() !== '') {
@@ -842,8 +972,19 @@ function getFilteredTasks() {
   const statuses = FILTERS.statuses;
   const df = FILTERS.date;
   const keyword = (FILTERS.keyword || '').trim().toLowerCase();
+  const majorFilter = FILTERS.category?.major ?? CATEGORY_FILTER_ALL;
+  const minorFilter = FILTERS.category?.minor ?? CATEGORY_FILTER_MINOR_ALL;
 
   return TASKS.filter(t => {
+    if (majorFilter !== CATEGORY_FILTER_ALL) {
+      const major = String(t.大分類 ?? '').trim();
+      if (major !== majorFilter) return false;
+      if (minorFilter !== CATEGORY_FILTER_MINOR_ALL) {
+        const minor = String(t.中分類 ?? '').trim();
+        if (minor !== minorFilter) return false;
+      }
+    }
+
     // 担当者
     const who = String(t.担当者 ?? '').trim();
     if (assignee === ASSIGNEE_FILTER_UNASSIGNED) {
@@ -897,6 +1038,8 @@ function openCreate() {
   openModal({
     No: '',
     ステータス: STATUSES[0] || '未着手',
+    大分類: '',
+    中分類: '',
     タスク: '',
     担当者: '',
     優先度: '',
@@ -916,6 +1059,8 @@ function openModal(task, { mode }) {
   const title = document.getElementById('modal-title');
   const fno = document.getElementById('f-no');
   const fstat = document.getElementById('f-status');
+  const fmajor = document.getElementById('f-major');
+  const fminor = document.getElementById('f-minor');
   const fttl = document.getElementById('f-title');
   const fwho = document.getElementById('f-assignee');
   const fprio = document.getElementById('f-priority');
@@ -935,6 +1080,8 @@ function openModal(task, { mode }) {
 
   fno.value = task.No ?? '';
   fstat.value = task.ステータス || STATUSES[0] || '未着手';
+  if (fmajor) fmajor.value = task.大分類 || '';
+  if (fminor) fminor.value = task.中分類 || '';
   fttl.value = task.タスク || '';
   fwho.value = task.担当者 || '';
   fprio.value = task.優先度 !== undefined && task.優先度 !== null ? String(task.優先度) : '';
@@ -972,6 +1119,8 @@ function openModal(task, { mode }) {
     e.preventDefault();
     const payload = {
       ステータス: fstat.value.trim(),
+      大分類: fmajor ? fmajor.value.trim() : '',
+      中分類: fminor ? fminor.value.trim() : '',
       タスク: fttl.value.trim(),
       担当者: fwho.value.trim(),
       優先度: fprio.value.trim(),

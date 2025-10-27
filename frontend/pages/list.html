@@ -270,6 +270,28 @@
       font-size: 12px;
     }
 
+    .category-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: rgba(148, 163, 184, 0.12);
+    }
+
+    .category-major {
+      background: rgba(59, 130, 246, 0.18);
+      border-color: rgba(59, 130, 246, 0.4);
+      color: #bfdbfe;
+    }
+
+    .category-minor {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: rgba(16, 185, 129, 0.35);
+      color: #bbf7d0;
+    }
+
     .priority-pill {
       display: inline-flex;
       align-items: center;
@@ -478,6 +500,20 @@
       </select>
     </div>
 
+    <div class="filter">
+      <label for="flt-major">大分類</label>
+      <select id="flt-major">
+        <option value="__CATEGORY_ALL__">（すべて）</option>
+      </select>
+    </div>
+
+    <div class="filter">
+      <label for="flt-minor">中分類</label>
+      <select id="flt-minor" disabled>
+        <option value="__CATEGORY_MINOR_ALL__">（すべて）</option>
+      </select>
+    </div>
+
     <div class="filter" style="min-width:260px;flex:1;">
       <label>ステータス</label>
       <div class="status-checks" id="flt-statuses"></div>
@@ -547,6 +583,14 @@
         <div class="row">
           <label for="f-status">ステータス</label>
           <select id="f-status"></select>
+        </div>
+        <div class="row">
+          <label for="f-major">大分類</label>
+          <input type="text" id="f-major" />
+        </div>
+        <div class="row">
+          <label for="f-minor">中分類</label>
+          <input type="text" id="f-minor" />
         </div>
         <div class="row">
           <label for="f-priority">優先度</label>
