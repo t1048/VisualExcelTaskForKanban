@@ -18,7 +18,7 @@
 }
 
 table.task-list {
-  width: 100%;
+  width: max-content;
   min-width: 960px;
   border-collapse: separate;
   border-spacing: 0;
@@ -46,6 +46,10 @@ table.task-list thead th {
   border-bottom: 1px solid rgba(148, 163, 184, 0.35);
   font-weight: 600;
   color: #e2e8f0;
+}
+
+table.task-list thead th.resizable {
+  padding-right: 22px;
 }
 
 table.task-list thead th.sortable {
@@ -93,6 +97,44 @@ table.task-list tbody tr:last-child td {
 
 table.task-list tbody tr:hover {
   background: rgba(56, 189, 248, 0.08);
+}
+
+table.task-list thead th .column-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  touch-action: none;
+}
+
+table.task-list thead th .column-resizer::after {
+  content: '';
+  width: 2px;
+  height: 60%;
+  border-radius: 1px;
+  background: rgba(148, 163, 184, 0.4);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+table.task-list thead th:hover .column-resizer::after,
+table.task-list thead th .column-resizer:active::after {
+  opacity: 1;
+}
+
+body.is-column-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-column-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .status-pill,

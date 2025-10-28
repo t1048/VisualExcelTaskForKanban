@@ -65,21 +65,87 @@ const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => 
 const STATUS_SORT_SEQUENCE = ['', UNSET_STATUS_LABEL, '未着手', '進行中', '完了', '保留中'];
 
 const TABLE_COLUMN_CONFIG = [
-  { key: 'no', label: 'No', width: '70px', sortable: true },
-  { key: 'major', label: '大分類', width: '160px', sortable: true },
-  { key: 'minor', label: '中分類', width: '160px', sortable: true },
-  { key: 'task', label: 'タスク', sortable: true, className: 'col-task' },
-  { key: 'status', label: 'ステータス', width: '160px', sortable: true },
-  { key: 'assignee', label: '担当者', width: '160px', sortable: true },
-  { key: 'priority', label: '優先度', width: '140px', sortable: false },
-  { key: 'due', label: '期限', width: '160px', sortable: true },
-  { key: 'notes', label: '備考', sortable: false, className: 'col-notes' }
+  { key: 'no', label: 'No', width: 70, minWidth: 60, sortable: true },
+  { key: 'major', label: '大分類', width: 160, minWidth: 120, sortable: true },
+  { key: 'minor', label: '中分類', width: 160, minWidth: 120, sortable: true },
+  { key: 'task', label: 'タスク', sortable: true, className: 'col-task', minWidth: 260 },
+  { key: 'status', label: 'ステータス', width: 160, minWidth: 140, sortable: true },
+  { key: 'assignee', label: '担当者', width: 160, minWidth: 140, sortable: true },
+  { key: 'priority', label: '優先度', width: 140, minWidth: 120, sortable: false },
+  { key: 'due', label: '期限', width: 160, minWidth: 140, sortable: true },
+  { key: 'notes', label: '備考', sortable: false, className: 'col-notes', minWidth: 280 }
 ];
 
 const COLUMN_CONFIG_BY_KEY = new Map();
-TABLE_COLUMN_CONFIG.forEach(col => {
+TABLE_COLUMN_CONFIG.forEach((col, index) => {
+  col.index = index;
   COLUMN_CONFIG_BY_KEY.set(col.key, col);
 });
+
+const COLUMN_WIDTH_STORAGE_KEY = 'taskList.columnWidths';
+let COLUMN_WIDTHS = loadColumnWidths();
+
+function numericWidth(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function getColumnMinWidth(col) {
+  if (!col) return 60;
+  if (typeof col.minWidth === 'number' && Number.isFinite(col.minWidth)) {
+    return col.minWidth;
+  }
+  const parsed = numericWidth(col.minWidth);
+  return Number.isFinite(parsed) ? parsed : 60;
+}
+
+function getStoredColumnWidth(columnKey) {
+  if (!COLUMN_WIDTHS || typeof COLUMN_WIDTHS !== 'object') return undefined;
+  const value = COLUMN_WIDTHS[columnKey];
+  const numeric = numericWidth(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined;
+}
+
+function setStoredColumnWidth(columnKey, value) {
+  const numeric = numericWidth(value);
+  if (!Number.isFinite(numeric)) return;
+  if (!COLUMN_WIDTHS || typeof COLUMN_WIDTHS !== 'object') {
+    COLUMN_WIDTHS = {};
+  }
+  COLUMN_WIDTHS[columnKey] = Math.max(0, Math.round(numeric));
+}
+
+function loadColumnWidths() {
+  try {
+    const raw = window.localStorage?.getItem(COLUMN_WIDTH_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const result = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      const numeric = numericWidth(value);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        result[key] = Math.round(numeric);
+      }
+    });
+    return result;
+  } catch (err) {
+    console.warn('[list] failed to load column widths', err);
+    return {};
+  }
+}
+
+function saveColumnWidths() {
+  try {
+    window.localStorage?.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(COLUMN_WIDTHS || {}));
+  } catch (err) {
+    console.warn('[list] failed to save column widths', err);
+  }
+}
 
 let SORT_STATE = [];
 
@@ -177,6 +243,131 @@ const SORT_COMPARATORS = {
   assignee: compareAssigneeValues,
   due: compareDueValues,
 };
+
+function getEffectiveColumnWidth(columnKey) {
+  const column = COLUMN_CONFIG_BY_KEY.get(columnKey);
+  const stored = getStoredColumnWidth(columnKey);
+  if (Number.isFinite(stored)) return stored;
+  if (column?.width !== undefined) {
+    const numeric = numericWidth(column.width);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return undefined;
+}
+
+function applyColumnBaseStyles(cell, columnKey) {
+  const column = COLUMN_CONFIG_BY_KEY.get(columnKey);
+  if (!column) return;
+  cell.classList.add(`col-${columnKey}`);
+  const minWidth = getColumnMinWidth(column);
+  if (Number.isFinite(minWidth) && minWidth > 0) {
+    cell.style.minWidth = `${minWidth}px`;
+  }
+  const width = getEffectiveColumnWidth(columnKey);
+  if (Number.isFinite(width) && width > 0) {
+    cell.style.width = `${width}px`;
+  }
+}
+
+function applyColumnWidth(table, columnKey, width) {
+  const column = COLUMN_CONFIG_BY_KEY.get(columnKey);
+  if (!column) return;
+  const minWidth = getColumnMinWidth(column);
+  const normalized = Math.max(minWidth, Math.round(width));
+  const px = `${normalized}px`;
+
+  const headerCell = table.querySelector(`thead th[data-column-key="${columnKey}"]`);
+  if (headerCell) {
+    headerCell.style.width = px;
+    headerCell.style.minWidth = `${minWidth}px`;
+  }
+
+  const colElement = table.querySelector(`col[data-column-key="${columnKey}"]`);
+  if (colElement) {
+    colElement.style.width = px;
+  }
+
+  table.querySelectorAll(`tbody tr`).forEach(row => {
+    const cell = row.children[column.index];
+    if (cell) {
+      cell.style.width = px;
+      cell.style.minWidth = `${minWidth}px`;
+    }
+  });
+}
+
+let columnResizeState = null;
+
+function startColumnResize(ev, table, columnKey) {
+  if (ev.button !== undefined && ev.button !== 0) return;
+  const column = COLUMN_CONFIG_BY_KEY.get(columnKey);
+  if (!column) return;
+  if (typeof ev.preventDefault === 'function') ev.preventDefault();
+  if (typeof ev.stopPropagation === 'function') ev.stopPropagation();
+
+  const clientX = typeof ev.clientX === 'number' ? ev.clientX : (ev.touches?.[0]?.clientX ?? 0);
+  const headerCell = table.querySelector(`thead th[data-column-key="${columnKey}"]`);
+  const startWidth = headerCell ? headerCell.getBoundingClientRect().width : getEffectiveColumnWidth(columnKey) || getColumnMinWidth(column);
+
+  columnResizeState = {
+    table,
+    columnKey,
+    startX: clientX,
+    startWidth,
+    minWidth: getColumnMinWidth(column),
+    lastWidth: startWidth,
+  };
+
+  const usePointerEvents = 'PointerEvent' in window;
+  if (usePointerEvents) {
+    document.addEventListener('pointermove', handleColumnResizeMove);
+    document.addEventListener('pointerup', handleColumnResizeEnd);
+    document.addEventListener('pointercancel', handleColumnResizeEnd);
+  } else {
+    document.addEventListener('mousemove', handleColumnResizeMove);
+    document.addEventListener('mouseup', handleColumnResizeEnd);
+    document.addEventListener('touchmove', handleColumnResizeMove, { passive: false });
+    document.addEventListener('touchend', handleColumnResizeEnd);
+    document.addEventListener('touchcancel', handleColumnResizeEnd);
+  }
+  document.body.classList.add('is-column-resizing');
+}
+
+function handleColumnResizeMove(ev) {
+  if (!columnResizeState) return;
+  if ('buttons' in ev && ev.buttons === 0) {
+    handleColumnResizeEnd(ev);
+    return;
+  }
+  if (typeof ev.preventDefault === 'function') ev.preventDefault();
+  const clientX = typeof ev.clientX === 'number' ? ev.clientX : (ev.touches?.[0]?.clientX ?? columnResizeState.startX);
+  const delta = clientX - columnResizeState.startX;
+  const nextWidth = Math.max(columnResizeState.minWidth, columnResizeState.startWidth + delta);
+  applyColumnWidth(columnResizeState.table, columnResizeState.columnKey, nextWidth);
+  columnResizeState.lastWidth = nextWidth;
+}
+
+function handleColumnResizeEnd() {
+  if (!columnResizeState) return;
+  if ('PointerEvent' in window) {
+    document.removeEventListener('pointermove', handleColumnResizeMove);
+    document.removeEventListener('pointerup', handleColumnResizeEnd);
+    document.removeEventListener('pointercancel', handleColumnResizeEnd);
+  } else {
+    document.removeEventListener('mousemove', handleColumnResizeMove);
+    document.removeEventListener('mouseup', handleColumnResizeEnd);
+    document.removeEventListener('touchmove', handleColumnResizeMove);
+    document.removeEventListener('touchend', handleColumnResizeEnd);
+    document.removeEventListener('touchcancel', handleColumnResizeEnd);
+  }
+  document.body.classList.remove('is-column-resizing');
+
+  if (Number.isFinite(columnResizeState.lastWidth)) {
+    setStoredColumnWidth(columnResizeState.columnKey, columnResizeState.lastWidth);
+    saveColumnWidths();
+  }
+  columnResizeState = null;
+}
 
 function defaultListComparator(a, b, statusOrder) {
   const normalizedA = normalizeStatusLabel(a.ステータス);
@@ -386,16 +577,28 @@ function renderList() {
   const table = document.createElement('table');
   table.className = 'task-list';
 
+  const colgroup = document.createElement('colgroup');
+  TABLE_COLUMN_CONFIG.forEach(col => {
+    const colEl = document.createElement('col');
+    colEl.dataset.columnKey = col.key;
+    const width = getEffectiveColumnWidth(col.key);
+    if (Number.isFinite(width) && width > 0) {
+      colEl.style.width = `${width}px`;
+    }
+    colgroup.appendChild(colEl);
+  });
+  table.appendChild(colgroup);
+
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
   TABLE_COLUMN_CONFIG.forEach(col => {
     const th = document.createElement('th');
-    if (col.width) th.style.width = col.width;
+    th.dataset.columnKey = col.key;
+    applyColumnBaseStyles(th, col.key);
     if (col.className) th.classList.add(col.className);
     th.textContent = col.label;
     if (col.sortable) {
       th.classList.add('sortable');
-      th.dataset.columnKey = col.key;
       th.setAttribute('aria-sort', 'none');
       th.tabIndex = 0;
       th.addEventListener('click', () => handleSortToggle(col.key));
@@ -406,6 +609,18 @@ function renderList() {
         }
       });
     }
+    th.classList.add('resizable');
+    const resizer = document.createElement('div');
+    resizer.className = 'column-resizer';
+    resizer.title = '列幅を変更';
+    if ('PointerEvent' in window) {
+      resizer.addEventListener('pointerdown', (ev) => startColumnResize(ev, table, col.key));
+    } else {
+      resizer.addEventListener('mousedown', (ev) => startColumnResize(ev, table, col.key));
+      resizer.addEventListener('touchstart', (ev) => startColumnResize(ev, table, col.key), { passive: false });
+    }
+    resizer.addEventListener('click', (ev) => ev.stopPropagation());
+    th.appendChild(resizer);
     headerRow.appendChild(th);
   });
   thead.appendChild(headerRow);
@@ -438,10 +653,12 @@ function renderList() {
       tr.addEventListener('dblclick', () => openEdit(task.No));
 
       const noTd = document.createElement('td');
+      applyColumnBaseStyles(noTd, 'no');
       noTd.textContent = task.No ? `#${task.No}` : '';
       tr.appendChild(noTd);
 
       const majorTd = document.createElement('td');
+      applyColumnBaseStyles(majorTd, 'major');
       if ((task.大分類 || '').trim()) {
         const badge = document.createElement('span');
         badge.className = 'category-pill category-major';
@@ -451,6 +668,7 @@ function renderList() {
       tr.appendChild(majorTd);
 
       const minorTd = document.createElement('td');
+      applyColumnBaseStyles(minorTd, 'minor');
       if ((task.中分類 || '').trim()) {
         const badge = document.createElement('span');
         badge.className = 'category-pill category-minor';
@@ -460,11 +678,13 @@ function renderList() {
       tr.appendChild(minorTd);
 
       const titleTd = document.createElement('td');
+      applyColumnBaseStyles(titleTd, 'task');
       titleTd.classList.add('task-cell', 'col-task');
       titleTd.textContent = task.タスク || '(無題)';
       tr.appendChild(titleTd);
 
       const statusTd = document.createElement('td');
+      applyColumnBaseStyles(statusTd, 'status');
       const statusPill = document.createElement('span');
       statusPill.className = 'status-pill';
       statusPill.textContent = normalizeStatusLabel(task.ステータス);
@@ -472,10 +692,12 @@ function renderList() {
       tr.appendChild(statusTd);
 
       const assigneeTd = document.createElement('td');
+      applyColumnBaseStyles(assigneeTd, 'assignee');
       assigneeTd.textContent = (task.担当者 || '').trim();
       tr.appendChild(assigneeTd);
 
       const priorityTd = document.createElement('td');
+      applyColumnBaseStyles(priorityTd, 'priority');
       if (task.優先度 !== undefined && task.優先度 !== null && String(task.優先度).trim() !== '') {
         const pill = document.createElement('span');
         pill.className = 'priority-pill';
@@ -485,6 +707,7 @@ function renderList() {
       tr.appendChild(priorityTd);
 
       const dueTd = document.createElement('td');
+      applyColumnBaseStyles(dueTd, 'due');
       if (task.期限) {
         const due = document.createElement('span');
         due.className = 'due-badge';
@@ -501,6 +724,7 @@ function renderList() {
       tr.appendChild(dueTd);
 
       const notesTd = document.createElement('td');
+      applyColumnBaseStyles(notesTd, 'notes');
       notesTd.classList.add('notes-cell', 'col-notes');
       notesTd.textContent = task.備考 || '';
       tr.appendChild(notesTd);
