@@ -141,6 +141,92 @@ TABLE_COLUMN_CONFIG.forEach((col, index) => {
 const COLUMN_WIDTH_STORAGE_KEY = 'taskList.columnWidths';
 let COLUMN_WIDTHS = loadColumnWidths();
 
+let horizontalScrollInitialized = false;
+let horizontalScrollSyncing = false;
+let horizontalScrollElements = null;
+let pendingHorizontalScrollbarUpdate = false;
+
+function getHorizontalScrollElements() {
+  if (horizontalScrollElements) {
+    const { scroller, bar, inner } = horizontalScrollElements;
+    if (scroller?.isConnected && bar?.isConnected && inner?.isConnected) {
+      return horizontalScrollElements;
+    }
+  }
+  const scroller = document.getElementById('list-panel-scroll');
+  const bar = document.getElementById('list-scrollbar');
+  const inner = document.getElementById('list-scrollbar-inner');
+  if (!scroller || !bar || !inner) {
+    horizontalScrollElements = null;
+    return null;
+  }
+  horizontalScrollElements = { scroller, bar, inner };
+  return horizontalScrollElements;
+}
+
+function ensureHorizontalScrollBindings() {
+  const elements = getHorizontalScrollElements();
+  if (!elements) return null;
+  if (!horizontalScrollInitialized) {
+    const { scroller, bar } = elements;
+    const syncFromScroller = () => {
+      if (horizontalScrollSyncing) return;
+      horizontalScrollSyncing = true;
+      bar.scrollLeft = scroller.scrollLeft;
+      window.requestAnimationFrame(() => {
+        horizontalScrollSyncing = false;
+      });
+    };
+    const syncFromBar = () => {
+      if (horizontalScrollSyncing) return;
+      horizontalScrollSyncing = true;
+      scroller.scrollLeft = bar.scrollLeft;
+      window.requestAnimationFrame(() => {
+        horizontalScrollSyncing = false;
+      });
+    };
+    scroller.addEventListener('scroll', syncFromScroller, { passive: true });
+    bar.addEventListener('scroll', syncFromBar, { passive: true });
+    horizontalScrollInitialized = true;
+  }
+  return elements;
+}
+
+function updateHorizontalScrollbar(table) {
+  const elements = ensureHorizontalScrollBindings();
+  if (!elements) return;
+  const { scroller, bar, inner } = elements;
+  const tableWidth = table?.scrollWidth ?? 0;
+  const scrollerWidth = scroller?.scrollWidth ?? 0;
+  const maxWidth = Math.max(tableWidth, scrollerWidth, bar.clientWidth);
+  inner.style.width = `${Math.max(0, Math.round(maxWidth))}px`;
+
+  const currentLeft = scroller.scrollLeft;
+  horizontalScrollSyncing = true;
+  if (Math.abs(bar.scrollLeft - currentLeft) > 1) {
+    bar.scrollLeft = currentLeft;
+  }
+  window.requestAnimationFrame(() => {
+    horizontalScrollSyncing = false;
+  });
+
+  if (maxWidth <= bar.clientWidth + 1) {
+    bar.classList.add('is-scroll-disabled');
+  } else {
+    bar.classList.remove('is-scroll-disabled');
+  }
+}
+
+function scheduleHorizontalScrollbarUpdate() {
+  if (pendingHorizontalScrollbarUpdate) return;
+  pendingHorizontalScrollbarUpdate = true;
+  window.requestAnimationFrame(() => {
+    pendingHorizontalScrollbarUpdate = false;
+    const table = document.querySelector('#list-container table.task-list');
+    updateHorizontalScrollbar(table || null);
+  });
+}
+
 function numericWidth(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -477,6 +563,7 @@ function handleColumnResizeMove(ev) {
   const nextWidth = Math.max(columnResizeState.minWidth, columnResizeState.startWidth + delta);
   applyColumnWidth(columnResizeState.table, columnResizeState.columnKey, nextWidth);
   columnResizeState.lastWidth = nextWidth;
+  scheduleHorizontalScrollbarUpdate();
 }
 
 function handleColumnResizeEnd() {
@@ -498,6 +585,7 @@ function handleColumnResizeEnd() {
     setStoredColumnWidth(columnResizeState.columnKey, columnResizeState.lastWidth);
     saveColumnWidths();
   }
+  scheduleHorizontalScrollbarUpdate();
   columnResizeState = null;
 }
 
@@ -689,6 +777,7 @@ function renderList() {
     empty.className = 'empty-message';
     empty.textContent = '該当するタスクはありません。';
     container.appendChild(empty);
+    updateHorizontalScrollbar(null);
     updateDueIndicators(filtered);
     return;
   }
@@ -868,6 +957,7 @@ function renderList() {
   table.appendChild(tbody);
   container.appendChild(table);
 
+  updateHorizontalScrollbar(table);
   updateDueIndicators(filtered);
 }
 
@@ -1597,3 +1687,5 @@ function closeModal() {
   modal.classList.remove('open');
   modal.setAttribute('aria-hidden', 'true');
 }
+
+window.addEventListener('resize', scheduleHorizontalScrollbarUpdate);
