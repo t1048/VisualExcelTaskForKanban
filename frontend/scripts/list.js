@@ -41,6 +41,10 @@ const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
 const CATEGORY_FILTER_ALL = '__CATEGORY_ALL__';
 const CATEGORY_FILTER_MINOR_ALL = '__CATEGORY_MINOR_ALL__';
+const MAJOR_EMPTY_LABEL = '（大分類なし）';
+const MINOR_EMPTY_LABEL = '（中分類なし）';
+const MAJOR_EMPTY_KEY = '__EMPTY_MAJOR__';
+const MINOR_EMPTY_KEY = '__EMPTY_MINOR__';
 let STATUSES = [];
 let FILTERS = {
   assignee: ASSIGNEE_FILTER_ALL,
@@ -159,6 +163,82 @@ function compareLocaleStrings(a, b) {
   if (!a) return 1;
   if (!b) return -1;
   return a.localeCompare(b, 'ja');
+}
+
+function normalizeCategoryValue(value) {
+  return String(value ?? '').trim();
+}
+
+function buildGroupedTaskList(tasks) {
+  const majorGroups = [];
+  const majorMap = new Map();
+
+  tasks.forEach(task => {
+    const majorRaw = normalizeCategoryValue(task?.大分類);
+    const minorRaw = normalizeCategoryValue(task?.中分類);
+    const majorKey = majorRaw || MAJOR_EMPTY_KEY;
+    const minorKey = minorRaw || MINOR_EMPTY_KEY;
+    const majorLabel = majorRaw || MAJOR_EMPTY_LABEL;
+    const minorLabel = minorRaw || MINOR_EMPTY_LABEL;
+
+    let majorGroup = majorMap.get(majorKey);
+    if (!majorGroup) {
+      majorGroup = {
+        key: majorKey,
+        label: majorLabel,
+        minors: [],
+        minorMap: new Map(),
+      };
+      majorMap.set(majorKey, majorGroup);
+      majorGroups.push(majorGroup);
+    }
+
+    let minorGroup = majorGroup.minorMap.get(minorKey);
+    if (!minorGroup) {
+      minorGroup = {
+        key: minorKey,
+        label: minorLabel,
+        tasks: [],
+      };
+      majorGroup.minorMap.set(minorKey, minorGroup);
+      majorGroup.minors.push(minorGroup);
+    }
+
+    minorGroup.tasks.push(task);
+  });
+
+  majorGroups.forEach(group => {
+    group.count = group.minors.reduce((sum, minor) => sum + minor.tasks.length, 0);
+    delete group.minorMap;
+  });
+
+  return majorGroups;
+}
+
+function createGroupRow(type, label, count) {
+  const row = document.createElement('tr');
+  row.classList.add('group-row');
+  row.classList.add(type === 'major' ? 'group-major' : 'group-minor');
+
+  const cell = document.createElement('td');
+  cell.colSpan = TABLE_COLUMN_CONFIG.length;
+  cell.classList.add('group-cell');
+
+  const title = document.createElement('span');
+  title.className = 'group-label';
+  const prefix = type === 'major' ? '大分類' : '中分類';
+  title.textContent = `${prefix}: ${label}`;
+  cell.appendChild(title);
+
+  if (typeof count === 'number' && Number.isFinite(count)) {
+    const countSpan = document.createElement('span');
+    countSpan.className = 'group-count';
+    countSpan.textContent = `（${count}件）`;
+    cell.appendChild(countSpan);
+  }
+
+  row.appendChild(cell);
+  return row;
 }
 
 function statusSortWeight(name) {
@@ -647,90 +727,101 @@ function renderList() {
       return defaultListComparator(a, b, statusOrder);
     });
 
-  sortedTasks.forEach(task => {
-      const tr = document.createElement('tr');
-      tr.dataset.no = String(task.No || '');
-      tr.addEventListener('dblclick', () => openEdit(task.No));
+  const createTaskRow = (task) => {
+    const tr = document.createElement('tr');
+    tr.dataset.no = String(task.No || '');
+    tr.addEventListener('dblclick', () => openEdit(task.No));
 
-      const noTd = document.createElement('td');
-      applyColumnBaseStyles(noTd, 'no');
-      noTd.textContent = task.No ? `#${task.No}` : '';
-      tr.appendChild(noTd);
+    const noTd = document.createElement('td');
+    applyColumnBaseStyles(noTd, 'no');
+    noTd.textContent = task.No ? `#${task.No}` : '';
+    tr.appendChild(noTd);
 
-      const majorTd = document.createElement('td');
-      applyColumnBaseStyles(majorTd, 'major');
-      if ((task.大分類 || '').trim()) {
-        const badge = document.createElement('span');
-        badge.className = 'category-pill category-major';
-        badge.textContent = task.大分類.trim();
-        majorTd.appendChild(badge);
+    const majorTd = document.createElement('td');
+    applyColumnBaseStyles(majorTd, 'major');
+    if ((task.大分類 || '').trim()) {
+      const badge = document.createElement('span');
+      badge.className = 'category-pill category-major';
+      badge.textContent = task.大分類.trim();
+      majorTd.appendChild(badge);
+    }
+    tr.appendChild(majorTd);
+
+    const minorTd = document.createElement('td');
+    applyColumnBaseStyles(minorTd, 'minor');
+    if ((task.中分類 || '').trim()) {
+      const badge = document.createElement('span');
+      badge.className = 'category-pill category-minor';
+      badge.textContent = task.中分類.trim();
+      minorTd.appendChild(badge);
+    }
+    tr.appendChild(minorTd);
+
+    const titleTd = document.createElement('td');
+    applyColumnBaseStyles(titleTd, 'task');
+    titleTd.classList.add('task-cell', 'col-task');
+    titleTd.textContent = task.タスク || '(無題)';
+    tr.appendChild(titleTd);
+
+    const statusTd = document.createElement('td');
+    applyColumnBaseStyles(statusTd, 'status');
+    const statusPill = document.createElement('span');
+    statusPill.className = 'status-pill';
+    statusPill.textContent = normalizeStatusLabel(task.ステータス);
+    statusTd.appendChild(statusPill);
+    tr.appendChild(statusTd);
+
+    const assigneeTd = document.createElement('td');
+    applyColumnBaseStyles(assigneeTd, 'assignee');
+    assigneeTd.textContent = (task.担当者 || '').trim();
+    tr.appendChild(assigneeTd);
+
+    const priorityTd = document.createElement('td');
+    applyColumnBaseStyles(priorityTd, 'priority');
+    if (task.優先度 !== undefined && task.優先度 !== null && String(task.優先度).trim() !== '') {
+      const pill = document.createElement('span');
+      pill.className = 'priority-pill';
+      pill.textContent = `優先度: ${task.優先度}`;
+      priorityTd.appendChild(pill);
+    }
+    tr.appendChild(priorityTd);
+
+    const dueTd = document.createElement('td');
+    applyColumnBaseStyles(dueTd, 'due');
+    if (task.期限) {
+      const due = document.createElement('span');
+      due.className = 'due-badge';
+      let label = task.期限;
+      const state = getDueState(task);
+      if (state) {
+        if (state.level === 'overdue') due.classList.add('due-overdue');
+        if (state.level === 'warning') due.classList.add('due-warning');
+        label += `（${state.label}）`;
       }
-      tr.appendChild(majorTd);
+      due.textContent = label;
+      dueTd.appendChild(due);
+    }
+    tr.appendChild(dueTd);
 
-      const minorTd = document.createElement('td');
-      applyColumnBaseStyles(minorTd, 'minor');
-      if ((task.中分類 || '').trim()) {
-        const badge = document.createElement('span');
-        badge.className = 'category-pill category-minor';
-        badge.textContent = task.中分類.trim();
-        minorTd.appendChild(badge);
-      }
-      tr.appendChild(minorTd);
+    const notesTd = document.createElement('td');
+    applyColumnBaseStyles(notesTd, 'notes');
+    notesTd.classList.add('notes-cell', 'col-notes');
+    notesTd.textContent = task.備考 || '';
+    tr.appendChild(notesTd);
 
-      const titleTd = document.createElement('td');
-      applyColumnBaseStyles(titleTd, 'task');
-      titleTd.classList.add('task-cell', 'col-task');
-      titleTd.textContent = task.タスク || '(無題)';
-      tr.appendChild(titleTd);
+    return tr;
+  };
 
-      const statusTd = document.createElement('td');
-      applyColumnBaseStyles(statusTd, 'status');
-      const statusPill = document.createElement('span');
-      statusPill.className = 'status-pill';
-      statusPill.textContent = normalizeStatusLabel(task.ステータス);
-      statusTd.appendChild(statusPill);
-      tr.appendChild(statusTd);
-
-      const assigneeTd = document.createElement('td');
-      applyColumnBaseStyles(assigneeTd, 'assignee');
-      assigneeTd.textContent = (task.担当者 || '').trim();
-      tr.appendChild(assigneeTd);
-
-      const priorityTd = document.createElement('td');
-      applyColumnBaseStyles(priorityTd, 'priority');
-      if (task.優先度 !== undefined && task.優先度 !== null && String(task.優先度).trim() !== '') {
-        const pill = document.createElement('span');
-        pill.className = 'priority-pill';
-        pill.textContent = `優先度: ${task.優先度}`;
-        priorityTd.appendChild(pill);
-      }
-      tr.appendChild(priorityTd);
-
-      const dueTd = document.createElement('td');
-      applyColumnBaseStyles(dueTd, 'due');
-      if (task.期限) {
-        const due = document.createElement('span');
-        due.className = 'due-badge';
-        let label = task.期限;
-        const state = getDueState(task);
-        if (state) {
-          if (state.level === 'overdue') due.classList.add('due-overdue');
-          if (state.level === 'warning') due.classList.add('due-warning');
-          label += `（${state.label}）`;
-        }
-        due.textContent = label;
-        dueTd.appendChild(due);
-      }
-      tr.appendChild(dueTd);
-
-      const notesTd = document.createElement('td');
-      applyColumnBaseStyles(notesTd, 'notes');
-      notesTd.classList.add('notes-cell', 'col-notes');
-      notesTd.textContent = task.備考 || '';
-      tr.appendChild(notesTd);
-
-      tbody.appendChild(tr);
+  const groupedTasks = buildGroupedTaskList(sortedTasks);
+  groupedTasks.forEach(majorGroup => {
+    tbody.appendChild(createGroupRow('major', majorGroup.label, majorGroup.count));
+    majorGroup.minors.forEach(minorGroup => {
+      tbody.appendChild(createGroupRow('minor', minorGroup.label, minorGroup.tasks.length));
+      minorGroup.tasks.forEach(task => {
+        tbody.appendChild(createTaskRow(task));
+      });
     });
+  });
 
   table.appendChild(tbody);
   container.appendChild(table);
