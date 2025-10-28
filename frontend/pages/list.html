@@ -94,8 +94,13 @@
   </aside>
 
   <div class="list-wrapper">
-    <div class="list-panel">
-      <div id="list-container" aria-live="polite"></div>
+    <div class="list-panel" id="list-panel">
+      <div class="list-panel-scroll" id="list-panel-scroll">
+        <div id="list-container" aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="list-scrollbar" id="list-scrollbar" aria-hidden="true">
+      <div class="list-scrollbar-inner" id="list-scrollbar-inner"></div>
     </div>
   </div>
 
