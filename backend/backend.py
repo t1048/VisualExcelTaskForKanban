@@ -300,6 +300,9 @@ class TaskStore:
 
         if isinstance(value, str):
             text = value.strip()
+            if col_name == "備考" and text:
+                normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+                text = normalized.replace("\n", "\r\n")
             return text if text else None
 
         return value
