@@ -21,6 +21,11 @@ const {
 let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
 let WIRED = false;        // ツールバー多重バインド防止
+let FILTER_TOGGLE_WIRED = false;
+
+const FILTERS_COLLAPSED_STORAGE_KEY = 'taskList.filtersCollapsed';
+let FILTERS_COLLAPSED = loadFiltersCollapsed();
+applyFilterCollapsedState();
 
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
@@ -200,6 +205,49 @@ function saveColumnWidths() {
     window.localStorage?.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(COLUMN_WIDTHS || {}));
   } catch (err) {
     console.warn('[list] failed to save column widths', err);
+  }
+}
+
+function loadFiltersCollapsed() {
+  try {
+    const raw = window.localStorage?.getItem(FILTERS_COLLAPSED_STORAGE_KEY);
+    if (!raw) return false;
+    return raw === '1' || raw === 'true';
+  } catch (err) {
+    console.warn('[list] failed to load filter toggle state', err);
+    return false;
+  }
+}
+
+function saveFiltersCollapsed(value) {
+  try {
+    if (value) {
+      window.localStorage?.setItem(FILTERS_COLLAPSED_STORAGE_KEY, '1');
+    } else {
+      window.localStorage?.setItem(FILTERS_COLLAPSED_STORAGE_KEY, '0');
+    }
+  } catch (err) {
+    console.warn('[list] failed to save filter toggle state', err);
+  }
+}
+
+function applyFilterCollapsedState() {
+  const collapsed = !!FILTERS_COLLAPSED;
+  const body = document.body;
+  if (body) {
+    body.classList.toggle('filters-collapsed', collapsed);
+  }
+  const filtersBar = document.getElementById('filters-bar');
+  if (filtersBar) {
+    filtersBar.hidden = collapsed;
+    filtersBar.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+  }
+  const toggle = document.getElementById('btn-toggle-filters');
+  if (toggle) {
+    const expanded = collapsed ? 'false' : 'true';
+    toggle.setAttribute('aria-expanded', expanded);
+    toggle.dataset.expanded = expanded;
+    toggle.textContent = collapsed ? 'フィルター設定を表示' : 'フィルター設定を隠す';
   }
 }
 
@@ -671,6 +719,7 @@ async function init(force = false) {
   await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
   // 初回＆再読込時にフィルタUIを最新へ
   if (!WIRED) { wireToolbar(); WIRED = true; }
+  wireFilterToggle();
 }
 
 /* ===================== レンダリング ===================== */
@@ -1149,6 +1198,8 @@ function buildFiltersUI() {
     buildFiltersUI();
     renderList();
   };
+
+  applyFilterCollapsedState();
 }
 
 
@@ -1227,6 +1278,20 @@ function updateDueIndicators(tasks) {
 }
 
 /* ===================== ツールバー ===================== */
+function wireFilterToggle() {
+  const toggle = document.getElementById('btn-toggle-filters');
+  if (!toggle) return;
+  if (!FILTER_TOGGLE_WIRED) {
+    toggle.addEventListener('click', () => {
+      FILTERS_COLLAPSED = !FILTERS_COLLAPSED;
+      saveFiltersCollapsed(FILTERS_COLLAPSED);
+      applyFilterCollapsedState();
+    });
+    FILTER_TOGGLE_WIRED = true;
+  }
+  applyFilterCollapsedState();
+}
+
 function wireToolbar() {
   document.getElementById('btn-add').addEventListener('click', () => openCreate());
   document.getElementById('btn-save').addEventListener('click', async () => {
