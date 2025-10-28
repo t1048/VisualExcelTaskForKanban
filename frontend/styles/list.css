@@ -115,6 +115,46 @@ table.task-list tbody tr:hover {
   background: rgba(56, 189, 248, 0.08);
 }
 
+table.task-list tbody tr.group-row {
+  cursor: default;
+}
+
+table.task-list tbody tr.group-row td {
+  padding: 10px 18px;
+  font-weight: 600;
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+table.task-list tbody tr.group-row td.group-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+table.task-list tbody tr.group-row .group-count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+table.task-list tbody tr.group-major td {
+  background: rgba(30, 64, 175, 0.28);
+  border-left: 4px solid rgba(59, 130, 246, 0.6);
+  color: #dbeafe;
+}
+
+table.task-list tbody tr.group-minor td {
+  background: rgba(15, 118, 110, 0.24);
+  border-left: 4px solid rgba(16, 185, 129, 0.55);
+  font-weight: 500;
+  color: #ccfbf1;
+}
+
+table.task-list tbody tr.group-row:hover {
+  background: transparent;
+}
+
+
 table.task-list thead th .column-resizer {
   position: absolute;
   top: 0;
