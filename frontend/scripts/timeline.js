@@ -249,8 +249,10 @@ function renderSummary() {
     const due = parseISO(t.期限);
     return due && due >= from && due <= to;
   }).length;
-  const withoutDue = TASKS.filter(t => !parseISO(t.期限)).length;
-  summary.textContent = `表示期間: ${toLocale(from)} 〜 ${toLocale(to)} （${diff}日間） / 対象タスク ${inRange} 件、期限未設定 ${withoutDue} 件`;
+  const backlogTasks = collectBacklogTasks(from, to);
+  const backlogCount = backlogTasks.length;
+  const withoutDue = backlogTasks.filter(t => !parseISO(t.期限)).length;
+  summary.textContent = `表示期間: ${toLocale(from)} 〜 ${toLocale(to)} （${diff}日間） / 対象タスク ${inRange} 件、バックログ ${backlogCount} 件（期限未設定 ${withoutDue} 件）`;
 }
 
 function renderAssigneeFilter() {
@@ -323,12 +325,25 @@ function renderLegend() {
   }
 }
 
+function collectBacklogTasks(rangeFrom, rangeTo) {
+  if (!rangeFrom || !rangeTo || rangeFrom > rangeTo) {
+    return TASKS.filter(task => !parseISO(task.期限));
+  }
+  return TASKS.filter(task => {
+    const due = parseISO(task.期限);
+    if (!due) return true;
+    return due < rangeFrom || due > rangeTo;
+  });
+}
+
 function renderTimeline() {
   const wrapper = document.getElementById('timeline-wrapper');
   const from = parseISO(document.getElementById('date-from').value);
   const to = parseISO(document.getElementById('date-to').value);
   const assigneeSelect = document.getElementById('assignee-filter');
   const assigneeFilter = assigneeSelect ? assigneeSelect.value : ASSIGNEE_FILTER_ALL;
+  const backlogTasks = collectBacklogTasks(from, to);
+  renderBacklog(backlogTasks, { from, to });
   if (!from || !to || from > to) {
     wrapper.innerHTML = '<div class="message">期間の指定が正しくありません。</div>';
     return;
@@ -416,6 +431,113 @@ function renderTimeline() {
 
   wrapper.innerHTML = '';
   wrapper.appendChild(table);
+}
+
+function renderBacklog(tasks, { from, to } = {}) {
+  const container = document.getElementById('backlog-content');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  if (!tasks.length) {
+    const empty = document.createElement('div');
+    empty.className = 'message backlog-empty';
+    empty.textContent = 'バックログはありません。';
+    container.appendChild(empty);
+    return;
+  }
+
+  const groups = new Map();
+  tasks.forEach(task => {
+    const name = task.担当者?.trim() || ASSIGNEE_UNASSIGNED_LABEL;
+    if (!groups.has(name)) {
+      groups.set(name, []);
+    }
+    groups.get(name).push(task);
+  });
+
+  const assignees = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b, 'ja'));
+
+  assignees.forEach(name => {
+    const group = document.createElement('div');
+    group.className = 'backlog-group';
+
+    const heading = document.createElement('h3');
+    heading.className = 'backlog-group-title';
+    heading.textContent = name;
+    group.appendChild(heading);
+
+    const list = document.createElement('ul');
+    list.className = 'backlog-list';
+
+    const items = groups.get(name);
+    items.sort((a, b) => {
+      const dueA = parseISO(a.期限);
+      const dueB = parseISO(b.期限);
+      if (dueA && dueB && dueA.getTime() !== dueB.getTime()) return dueA - dueB;
+      if (dueA && !dueB) return -1;
+      if (!dueA && dueB) return 1;
+      if (a.No && b.No && a.No !== b.No) return a.No - b.No;
+      return (a.タスク || '').localeCompare(b.タスク || '', 'ja');
+    });
+
+    items.forEach(task => {
+      const item = document.createElement('li');
+      item.className = 'backlog-item';
+      item.dataset.no = task.No ?? '';
+
+      item.addEventListener('dblclick', () => {
+        if (task?.No) {
+          openEdit(task.No);
+        }
+      });
+
+      const title = document.createElement('div');
+      title.className = 'backlog-item-title';
+      title.textContent = task.タスク || '(タイトルなし)';
+      item.appendChild(title);
+
+      const meta = document.createElement('div');
+      meta.className = 'backlog-item-meta';
+
+      const status = document.createElement('span');
+      status.textContent = `ステータス: ${task.ステータス || '未設定'}`;
+      meta.appendChild(status);
+
+      if (task.No) {
+        const no = document.createElement('span');
+        no.textContent = `No.${task.No}`;
+        meta.appendChild(no);
+      }
+
+      const due = parseISO(task.期限);
+      const dueLabel = document.createElement('span');
+      if (due) {
+        let label = `期限: ${toLocale(due)}`;
+        if (from && due < from) {
+          label += '（開始前）';
+        } else if (to && due > to) {
+          label += '（終了後）';
+        }
+        dueLabel.textContent = label;
+      } else {
+        dueLabel.textContent = '期限: 未設定';
+      }
+      meta.appendChild(dueLabel);
+
+      if (task.備考) {
+        const notes = document.createElement('span');
+        notes.textContent = task.備考;
+        meta.appendChild(notes);
+      }
+
+      item.appendChild(meta);
+      list.appendChild(item);
+    });
+
+    group.appendChild(list);
+    container.appendChild(group);
+  });
 }
 
 function renderTaskChip(task) {
