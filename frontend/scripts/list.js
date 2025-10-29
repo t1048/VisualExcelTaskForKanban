@@ -758,7 +758,19 @@ async function init(force = false) {
 
   await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
   // 初回＆再読込時にフィルタUIを最新へ
-  if (!WIRED) { wireToolbar(); WIRED = true; }
+  if (!WIRED) {
+    const wired = wireToolbar();
+    if (wired) {
+      WIRED = true;
+    } else {
+      ready(() => {
+        if (WIRED) return;
+        if (wireToolbar()) {
+          WIRED = true;
+        }
+      });
+    }
+  }
 }
 
 /* ===================== レンダリング ===================== */
@@ -1320,8 +1332,17 @@ function updateDueIndicators(tasks) {
 
 /* ===================== ツールバー ===================== */
 function wireToolbar() {
-  document.getElementById('btn-add').addEventListener('click', () => openCreate());
-  document.getElementById('btn-save').addEventListener('click', async () => {
+  const addBtn = document.getElementById('btn-add');
+  const saveBtn = document.getElementById('btn-save');
+  const validationsBtn = document.getElementById('btn-validations');
+  const reloadBtn = document.getElementById('btn-reload');
+
+  if (!addBtn || !saveBtn || !validationsBtn || !reloadBtn) {
+    return false;
+  }
+
+  addBtn.addEventListener('click', () => openCreate());
+  saveBtn.addEventListener('click', async () => {
     try {
       const p = await api.save_excel();
       alert('Excelへ保存しました\n' + p);
@@ -1329,8 +1350,8 @@ function wireToolbar() {
       alert('保存に失敗: ' + (e?.message || e));
     }
   });
-  document.getElementById('btn-validations').addEventListener('click', () => openValidationModal());
-  document.getElementById('btn-reload').addEventListener('click', async () => {
+  validationsBtn.addEventListener('click', () => openValidationModal());
+  reloadBtn.addEventListener('click', async () => {
     try {
       const payload = await api.reload_from_excel();
       await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
@@ -1338,6 +1359,7 @@ function wireToolbar() {
       alert('再読込に失敗: ' + (e?.message || e));
     }
   });
+  return true;
 }
 
 /* ===================== 入力規則モーダル ===================== */
