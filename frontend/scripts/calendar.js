@@ -10,6 +10,7 @@ const {
   createPriorityHelper,
   setupRuntime,
   PRIORITY_DEFAULT_OPTIONS,
+  DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
   parseISO: parseISODate,
 } = window.TaskAppCommon;
@@ -229,40 +230,61 @@ function ensureMonthDefault() {
   updateMonthLabel();
 }
 
+const LEGEND_STATUS_ORDER = ['未着手', '進行中', '保留', '完了'];
+
 function renderLegend() {
   const legend = document.getElementById('calendar-legend');
   if (!legend) return;
   legend.innerHTML = '';
 
-  const statuses = Array.isArray(STATUSES) && STATUSES.length
-    ? STATUSES
-    : Array.from(new Set(TASKS.map(t => t.ステータス).filter(Boolean)));
+  const baseStatuses = Array.isArray(STATUSES) && STATUSES.length ? STATUSES : [];
+  const taskStatuses = TASKS.map(t => t.ステータス).filter(v => v !== undefined && v !== null);
+  const combined = [
+    ...LEGEND_STATUS_ORDER,
+    ...DEFAULT_STATUSES,
+    ...baseStatuses,
+    ...taskStatuses,
+  ];
+
   const seen = new Set();
-  statuses.forEach(name => {
+
+  const appendLegendItem = (labelText, colorKey = labelText) => {
     const dot = document.createElement('span');
     dot.className = 'legend-dot';
-    dot.style.background = statusColor(name);
+    dot.style.background = statusColor(colorKey);
     const item = document.createElement('span');
     item.className = 'legend-item';
     item.appendChild(dot);
     const label = document.createElement('span');
-    label.textContent = name;
+    label.textContent = labelText;
     item.appendChild(label);
     legend.appendChild(item);
-    seen.add(name);
+  };
+
+  const registerStatus = (labelText) => {
+    appendLegendItem(labelText);
+    seen.add(labelText);
+  };
+
+  combined.forEach((rawName) => {
+    const normalized = normalizeStatusLabel(rawName);
+    if (normalized === UNSET_STATUS_LABEL) return;
+    if (seen.has(normalized)) return;
+    registerStatus(normalized);
   });
-  const hasOther = TASKS.some(t => t.ステータス && !seen.has(t.ステータス));
+
+  const hasUnset = TASKS.some(task => normalizeStatusLabel(task.ステータス) === UNSET_STATUS_LABEL);
+  if (hasUnset && !seen.has(UNSET_STATUS_LABEL)) {
+    registerStatus(UNSET_STATUS_LABEL);
+  }
+
+  const hasOther = TASKS.some((task) => {
+    const normalized = normalizeStatusLabel(task.ステータス);
+    if (normalized === UNSET_STATUS_LABEL) return false;
+    return !seen.has(normalized);
+  });
   if (hasOther) {
-    const dot = document.createElement('span');
-    dot.className = 'legend-dot';
-    dot.style.background = statusColor('other');
-    const item = document.createElement('span');
-    item.className = 'legend-item';
-    item.appendChild(dot);
-    const label = document.createElement('span');
-    label.textContent = 'その他';
-    item.appendChild(label);
-    legend.appendChild(item);
+    appendLegendItem('その他', 'other');
   }
 }
 
@@ -375,26 +397,13 @@ function renderBacklog() {
   const container = document.getElementById('calendar-backlog-content');
   if (!container) return;
 
-  const range = getCalendarRange();
-  const monthStart = range?.monthStart;
-  const monthEnd = range?.monthEnd;
-
-  let tasks = TASKS.slice();
-  if (monthStart && monthEnd) {
-    tasks = tasks.filter(task => {
-      const due = parseISO(task.期限);
-      if (!due) return true;
-      return due < monthStart || due > monthEnd;
-    });
-  } else {
-    tasks = tasks.filter(task => !parseISO(task.期限));
-  }
+  const tasks = TASKS.filter(task => !parseISO(task.期限));
 
   container.innerHTML = '';
   if (!tasks.length) {
     const empty = document.createElement('div');
     empty.className = 'message backlog-empty';
-    empty.textContent = 'バックログはありません。';
+    empty.textContent = '期限未設定のタスクはありません。';
     container.appendChild(empty);
     return;
   }
@@ -847,15 +856,29 @@ function collectAllAssignees() {
 }
 
 function statusColor(name) {
-  switch (name) {
+  const normalized = normalizeStatusLabel(name);
+  if (normalized === UNSET_STATUS_LABEL) {
+    return 'rgba(148, 163, 184, 0.8)';
+  }
+
+  const key = normalized.replace(/\s+/g, '').toLowerCase();
+  switch (key) {
     case '未着手':
+    case 'notstarted':
       return 'rgba(248, 113, 113, 0.8)';
     case '進行中':
+    case '対応中':
+    case 'inprogress':
       return 'rgba(56, 189, 248, 0.8)';
-    case '完了':
-      return 'rgba(34, 197, 94, 0.8)';
     case '保留':
+    case 'pending':
       return 'rgba(250, 204, 21, 0.8)';
+    case '完了':
+    case '完了済み':
+    case '完了済':
+    case 'done':
+    case 'completed':
+      return 'rgba(34, 197, 94, 0.8)';
     default:
       return 'rgba(129, 140, 248, 0.8)';
   }
