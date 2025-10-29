@@ -540,7 +540,9 @@ function showGroupContextMenu(event, context) {
   menu.style.left = '-9999px';
   menu.style.top = '-9999px';
   menu.style.display = 'block';
-  positionContextMenu(menu, event.pageX, event.pageY);
+  const clientX = event.clientX ?? (event.pageX - (window.scrollX || window.pageXOffset || 0));
+  const clientY = event.clientY ?? (event.pageY - (window.scrollY || window.pageYOffset || 0));
+  positionContextMenu(menu, clientX, clientY);
 }
 
 document.addEventListener('click', (event) => {
