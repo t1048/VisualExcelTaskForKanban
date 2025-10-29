@@ -280,6 +280,7 @@ class TaskStore:
         self.excel_path = excel_path
         self._lock = threading.RLock()
         self._df = pd.DataFrame(columns=TASK_COLUMNS)
+        self._column_order: List[str] = list(TASK_COLUMNS)
         self._statuses: List[str] = list(DEFAULT_STATUSES)
         self._requested_sheet_name: str | None = (
             sheet_name.strip() if isinstance(sheet_name, str) and sheet_name.strip() else None
@@ -340,7 +341,10 @@ class TaskStore:
                 if col not in df.columns:
                     df[col] = pd.NA
 
-            df = df[TASK_COLUMNS].copy()
+            extra_columns = [col for col in df.columns if col not in TASK_COLUMNS]
+            ordered_columns = TASK_COLUMNS + extra_columns
+            df = df[ordered_columns].copy()
+            self._column_order = ordered_columns
 
             df = df.dropna(how="all", subset=TASK_COLUMNS).reset_index(drop=True)
 
@@ -670,11 +674,17 @@ class TaskStore:
                 else:
                     ws = wb[self._sheet_name]
 
+                current_columns = list(df.columns)
+                extra_columns = [col for col in current_columns if col not in TASK_COLUMNS]
+                ordered_columns = TASK_COLUMNS + extra_columns
+                df = df[ordered_columns]
+                self._column_order = ordered_columns
+
                 ws.delete_rows(1, ws.max_row)
-                ws.append(TASK_COLUMNS)
+                ws.append(ordered_columns)
                 for row in df.itertuples(index=False, name=None):
                     values: List[Any] = []
-                    for col_name, value in zip(TASK_COLUMNS, row):
+                    for col_name, value in zip(ordered_columns, row):
                         values.append(self._to_excel_value(col_name, value))
                     ws.append(values)
 
