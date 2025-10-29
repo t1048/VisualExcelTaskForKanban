@@ -421,7 +421,7 @@ table.task-list tbody tr.group-row:hover {
 }
 
 .group-context-menu {
-  position: absolute;
+  position: fixed;
   z-index: 2000;
   min-width: 200px;
   background: rgba(15, 23, 42, 0.96);
