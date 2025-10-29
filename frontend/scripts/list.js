@@ -177,7 +177,7 @@ const TABLE_COLUMN_CONFIG = [
   { key: 'task', label: 'タスク', sortable: true, className: 'col-task', minWidth: 260 },
   { key: 'status', label: 'ステータス', width: 160, minWidth: 140, sortable: true },
   { key: 'assignee', label: '担当者', width: 160, minWidth: 140, sortable: true },
-  { key: 'priority', label: '優先度', width: 140, minWidth: 120, sortable: false },
+  { key: 'priority', label: '優先度', width: 140, minWidth: 120, sortable: true },
   { key: 'due', label: '期限', width: 160, minWidth: 140, sortable: true },
   { key: 'notes', label: '備考', sortable: false, className: 'col-notes', minWidth: 280 }
 ];
@@ -643,6 +643,7 @@ const SORT_COMPARATORS = {
   minor: compareMinorValues,
   task: compareTaskValues,
   assignee: compareAssigneeValues,
+  priority: (a, b) => comparePriorityValues(a?.優先度, b?.優先度),
   due: compareDueValues,
 };
 
@@ -1461,16 +1462,16 @@ function buildFiltersUI() {
 const PRIORITY_LABEL_ORDER = new Map([
   ['最優先', 0],
   ['緊急', 0],
-  ['高', 1],
-  ['High', 1],
-  ['中', 2],
-  ['Medium', 2],
-  ['低', 3],
-  ['Low', 3],
-  ['通常', 4],
-  ['Normal', 4],
-  ['後回し', 5],
-  ['Low Priority', 5],
+  ['高', 0],
+  ['High', 0],
+  ['中', 1],
+  ['Medium', 1],
+  ['低', 2],
+  ['Low', 2],
+  ['通常', 3],
+  ['Normal', 3],
+  ['後回し', 4],
+  ['Low Priority', 4],
 ]);
 
 function prioritySortKey(value) {
