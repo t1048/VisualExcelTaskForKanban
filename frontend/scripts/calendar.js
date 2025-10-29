@@ -452,9 +452,7 @@ function renderBacklog() {
 
     const meta = document.createElement('div');
     meta.className = 'calendar-backlog-item-meta';
-    const status = document.createElement('span');
-    status.textContent = `ステータス: ${task.ステータス || '未設定'}`;
-    meta.appendChild(status);
+    meta.appendChild(createLabelValueSpan('ステータス', task.ステータス));
     if (task.No) {
       const no = document.createElement('span');
       no.textContent = `No.${task.No}`;
@@ -464,17 +462,23 @@ function renderBacklog() {
     const dueLabel = document.createElement('span');
     dueLabel.textContent = due ? `期限: ${toLocale(due)}` : '期限: 未設定';
     meta.appendChild(dueLabel);
-    if (task.担当者) {
-      const who = document.createElement('span');
-      who.textContent = `担当: ${task.担当者}`;
-      meta.appendChild(who);
-    }
+    meta.appendChild(createLabelValueSpan('大分類', task.大分類));
+    meta.appendChild(createLabelValueSpan('中分類', task.中分類));
+    meta.appendChild(createLabelValueSpan('重要度', task.優先度));
+    meta.appendChild(createLabelValueSpan('担当', task.担当者));
     item.appendChild(meta);
 
     list.appendChild(item);
   });
 
   container.appendChild(list);
+}
+
+function createLabelValueSpan(label, value) {
+  const span = document.createElement('span');
+  const text = String(value ?? '').trim();
+  span.textContent = `${label}: ${text || '未設定'}`;
+  return span;
 }
 
 function renderTaskCard(task) {
@@ -507,22 +511,19 @@ function renderTaskCard(task) {
   const meta = document.createElement('div');
   meta.className = 'task-meta';
 
-  const statusText = document.createElement('span');
-  statusText.textContent = task.ステータス || '未設定';
-  meta.appendChild(statusText);
+  meta.appendChild(createLabelValueSpan('ステータス', task.ステータス));
 
-  if (task.担当者) {
-    const who = document.createElement('span');
-    who.textContent = task.担当者;
-    meta.appendChild(who);
-  }
+  const majorLabel = String(task.大分類 ?? '').trim();
+  meta.appendChild(createLabelValueSpan('大分類', majorLabel));
+
+  const minorLabel = String(task.中分類 ?? '').trim();
+  meta.appendChild(createLabelValueSpan('中分類', minorLabel));
 
   const priorityText = String(task.優先度 ?? '').trim();
-  if (priorityText) {
-    const prio = document.createElement('span');
-    prio.textContent = `優先度: ${priorityText}`;
-    meta.appendChild(prio);
-  }
+  meta.appendChild(createLabelValueSpan('重要度', priorityText));
+
+  const assigneeLabel = String(task.担当者 ?? '').trim();
+  meta.appendChild(createLabelValueSpan('担当', assigneeLabel));
 
   if (task.No) {
     const no = document.createElement('span');
@@ -531,13 +532,6 @@ function renderTaskCard(task) {
   }
 
   card.appendChild(meta);
-
-  if (task.備考) {
-    const notes = document.createElement('span');
-    notes.className = 'task-notes';
-    notes.textContent = task.備考;
-    card.appendChild(notes);
-  }
 
   return card;
 }
