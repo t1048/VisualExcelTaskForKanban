@@ -7,9 +7,15 @@
   --accent-2: #22c55e;
   --danger: #f87171;
   --warning: #facc15;
+  --primary-color: #2563eb;
   --border: rgba(148, 163, 184, 0.24);
+  --border-color: rgba(148, 163, 184, 0.32);
+  --border-strong: rgba(148, 163, 184, 0.45);
   --shadow: 0 10px 36px rgba(8, 15, 40, 0.45);
   --radius: 14px;
+  --surface-elevated: rgba(15, 23, 42, 0.92);
+  --surface-muted: rgba(15, 23, 42, 0.6);
+  --text-muted: rgba(148, 163, 184, 0.82);
 }
 
 html,

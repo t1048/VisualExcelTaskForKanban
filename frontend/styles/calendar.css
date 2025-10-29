@@ -1,3 +1,8 @@
+body.page-calendar {
+  --calendar-cell-border: rgba(148, 163, 184, 0.58);
+  --calendar-task-border: rgba(148, 163, 184, 0.48);
+}
+
 .page-calendar .calendar-controls-panel {
   display: flex;
   flex-direction: column;
@@ -43,19 +48,23 @@
 
 .calendar-cell {
   background: var(--surface-elevated);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--calendar-cell-border, var(--border-strong));
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.18);
   border-radius: 6px;
   min-height: 160px;
   padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background-clip: padding-box;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .calendar-cell.outside-month {
   background: var(--surface-muted);
   color: var(--text-muted);
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.12);
 }
 
 .calendar-cell-header {
@@ -88,9 +97,10 @@
 }
 
 .calendar-task {
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid var(--calendar-task-border, var(--border-strong));
   border-left: 4px solid var(--primary-color);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 6px 8px;
   font-size: 13px;
   line-height: 1.4;
