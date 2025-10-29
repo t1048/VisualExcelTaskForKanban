@@ -9,6 +9,7 @@ const {
   normalizeValidationValues,
   createPriorityHelper,
   setupRuntime,
+  setupDragViewportAutoScroll,
   PRIORITY_DEFAULT_OPTIONS,
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
@@ -22,6 +23,7 @@ let STATUSES = [];
 let VALIDATIONS = {};
 let CURRENT_EDIT = null;
 let CURRENT_DRAG = null;
+let cleanupAutoScroll = null;
 
 const priorityHelper = createPriorityHelper({
   getValidations: () => VALIDATIONS,
@@ -48,6 +50,9 @@ setupRuntime({
 
 ready(() => {
   wireControls();
+  if (!cleanupAutoScroll && typeof setupDragViewportAutoScroll === 'function') {
+    cleanupAutoScroll = setupDragViewportAutoScroll();
+  }
 });
 
 async function init(force = false) {

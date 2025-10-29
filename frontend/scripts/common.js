@@ -413,6 +413,58 @@
     };
   }
 
+  function setupDragViewportAutoScroll({ margin = 80, maxStep = 24 } = {}) {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return () => {};
+    }
+
+    let dragDepth = 0;
+
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+    const handleDragStart = () => {
+      dragDepth += 1;
+    };
+
+    const reset = () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+    };
+
+    const handleDragOver = (event) => {
+      if (dragDepth <= 0) return;
+      if (typeof event?.clientY !== 'number') return;
+
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (!viewportHeight) return;
+
+      let delta = 0;
+      if (event.clientY < margin) {
+        const intensity = (margin - event.clientY) / margin;
+        delta = -Math.ceil(clamp(intensity, 0, 1) * maxStep);
+      } else if (event.clientY > viewportHeight - margin) {
+        const intensity = (event.clientY - (viewportHeight - margin)) / margin;
+        delta = Math.ceil(clamp(intensity, 0, 1) * maxStep);
+      }
+
+      if (delta !== 0) {
+        window.scrollBy({ top: delta, behavior: 'auto' });
+      }
+    };
+
+    document.addEventListener('dragstart', handleDragStart, { passive: true });
+    document.addEventListener('dragend', reset, { passive: true });
+    document.addEventListener('drop', reset, { passive: true });
+    document.addEventListener('dragover', handleDragOver, { passive: true });
+
+    return () => {
+      document.removeEventListener('dragstart', handleDragStart);
+      document.removeEventListener('dragend', reset);
+      document.removeEventListener('drop', reset);
+      document.removeEventListener('dragover', handleDragOver);
+      dragDepth = 0;
+    };
+  }
+
   function parseISODate(value) {
     if (!value) return null;
     if (value instanceof Date) {
@@ -808,6 +860,7 @@
     normalizeValidationValues,
     createPriorityHelper,
     setupRuntime,
+    setupDragViewportAutoScroll,
     parseISO: parseISODate,
     isCompletedStatus,
     getDueState,

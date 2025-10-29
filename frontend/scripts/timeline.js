@@ -9,6 +9,7 @@ const {
   normalizeValidationValues,
   createPriorityHelper,
   setupRuntime,
+  setupDragViewportAutoScroll,
   PRIORITY_DEFAULT_OPTIONS,
   UNSET_STATUS_LABEL,
 } = window.TaskAppCommon;
@@ -22,6 +23,7 @@ let CURRENT_EDIT = null;
 const ASSIGNEE_FILTER_ALL = '';
 const ASSIGNEE_FILTER_UNASSIGNED = '__UNASSIGNED__';
 const ASSIGNEE_UNASSIGNED_LABEL = '（未割り当て）';
+let cleanupAutoScroll = null;
 
 const priorityHelper = createPriorityHelper({
   getValidations: () => VALIDATIONS,
@@ -50,6 +52,9 @@ setupRuntime({
 
 ready(() => {
   wireControls();
+  if (!cleanupAutoScroll && typeof setupDragViewportAutoScroll === 'function') {
+    cleanupAutoScroll = setupDragViewportAutoScroll();
+  }
 });
 
 async function init(force = false) {
