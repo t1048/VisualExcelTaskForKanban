@@ -57,6 +57,8 @@ const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => 
 const WORKLOAD_IN_PROGRESS_KEYWORDS = ['進行', '作業中', 'inprogress', 'wip'];
 const WORKLOAD_HEAVY_THRESHOLD = 5;
 const FILTER_COLLAPSED_STORAGE_KEY = 'taskList.filtersCollapsed';
+const GROUP_CONTEXT_MENU_ID = 'group-context-menu';
+let GROUP_CONTEXT_STATE = null;
 
 function applyFilterCollapsedState() {
   const container = document.getElementById('filters-bar');
@@ -365,6 +367,7 @@ function buildGroupedTaskList(tasks) {
       majorGroup = {
         key: majorKey,
         label: majorLabel,
+        value: majorRaw,
         minors: [],
         minorMap: new Map(),
       };
@@ -377,6 +380,7 @@ function buildGroupedTaskList(tasks) {
       minorGroup = {
         key: minorKey,
         label: minorLabel,
+        value: minorRaw,
         tasks: [],
       };
       majorGroup.minorMap.set(minorKey, minorGroup);
@@ -394,7 +398,7 @@ function buildGroupedTaskList(tasks) {
   return majorGroups;
 }
 
-function createGroupRow(type, label, count) {
+function createGroupRow(type, label, count, meta = {}) {
   const row = document.createElement('tr');
   row.classList.add('group-row');
   row.classList.add(type === 'major' ? 'group-major' : 'group-minor');
@@ -416,8 +420,115 @@ function createGroupRow(type, label, count) {
   }
 
   row.appendChild(cell);
+
+  if (meta.majorValue !== undefined) {
+    row.dataset.majorValue = meta.majorValue ?? '';
+  }
+  if (meta.minorValue !== undefined) {
+    row.dataset.minorValue = meta.minorValue ?? '';
+  }
+  row.dataset.groupType = type;
+  row.addEventListener('contextmenu', (event) => {
+    showGroupContextMenu(event, {
+      type,
+      label,
+      majorValue: meta.majorValue ?? '',
+      minorValue: meta.minorValue,
+    });
+  });
+
   return row;
 }
+
+function ensureGroupContextMenu() {
+  let menu = document.getElementById(GROUP_CONTEXT_MENU_ID);
+  if (menu) return menu;
+
+  menu = document.createElement('div');
+  menu.id = GROUP_CONTEXT_MENU_ID;
+  menu.className = 'group-context-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-hidden', 'true');
+  menu.style.display = 'none';
+
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'group-context-menu-item';
+  item.textContent = 'ここの分類へタスク追加';
+  item.addEventListener('click', () => {
+    if (!GROUP_CONTEXT_STATE) return;
+    const { majorValue, minorValue } = GROUP_CONTEXT_STATE;
+    hideGroupContextMenu();
+    openCreate({
+      major: majorValue,
+      minor: minorValue,
+    });
+  });
+
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+
+  return menu;
+}
+
+function hideGroupContextMenu() {
+  const menu = document.getElementById(GROUP_CONTEXT_MENU_ID);
+  if (menu) {
+    menu.classList.remove('is-visible');
+    menu.setAttribute('aria-hidden', 'true');
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.display = 'none';
+  }
+  GROUP_CONTEXT_STATE = null;
+}
+
+function positionContextMenu(menu, x, y) {
+  const width = menu.offsetWidth || 0;
+  const height = menu.offsetHeight || 0;
+  let left = x;
+  let top = y;
+
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+
+  if (left + width > viewportWidth) {
+    left = Math.max(0, viewportWidth - width - 8);
+  }
+  if (top + height > viewportHeight) {
+    top = Math.max(0, viewportHeight - height - 8);
+  }
+
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function showGroupContextMenu(event, context) {
+  event.preventDefault();
+  event.stopPropagation();
+  hideGroupContextMenu();
+  const menu = ensureGroupContextMenu();
+  GROUP_CONTEXT_STATE = context;
+  menu.classList.add('is-visible');
+  menu.setAttribute('aria-hidden', 'false');
+
+  // ensure menu has dimensions before positioning
+  menu.style.left = '-9999px';
+  menu.style.top = '-9999px';
+  menu.style.display = 'block';
+  positionContextMenu(menu, event.pageX, event.pageY);
+}
+
+document.addEventListener('click', (event) => {
+  const menu = document.getElementById(GROUP_CONTEXT_MENU_ID);
+  if (!menu) return;
+  if (menu.contains(event.target)) return;
+  hideGroupContextMenu();
+});
+
+document.addEventListener('scroll', hideGroupContextMenu, true);
+window.addEventListener('blur', hideGroupContextMenu);
+window.addEventListener('resize', hideGroupContextMenu);
 
 function statusSortWeight(name) {
   const normalized = normalizeStatusLabel(name);
@@ -997,9 +1108,14 @@ function renderList() {
 
   const groupedTasks = buildGroupedTaskList(sortedTasks);
   groupedTasks.forEach(majorGroup => {
-    tbody.appendChild(createGroupRow('major', majorGroup.label, majorGroup.count));
+    tbody.appendChild(createGroupRow('major', majorGroup.label, majorGroup.count, {
+      majorValue: majorGroup.value,
+    }));
     majorGroup.minors.forEach(minorGroup => {
-      tbody.appendChild(createGroupRow('minor', minorGroup.label, minorGroup.tasks.length));
+      tbody.appendChild(createGroupRow('minor', minorGroup.label, minorGroup.tasks.length, {
+        majorValue: majorGroup.value,
+        minorValue: minorGroup.value,
+      }));
       minorGroup.tasks.forEach(task => {
         tbody.appendChild(createTaskRow(task));
       });
@@ -1549,13 +1665,14 @@ function getFilteredTasks() {
 
 
 /* ===================== モーダル: 追加/編集 ===================== */
-function openCreate() {
+function openCreate(defaults = {}) {
+  hideGroupContextMenu();
   CURRENT_EDIT = null;
   openModal({
     No: '',
     ステータス: STATUSES[0] || '未着手',
-    大分類: '',
-    中分類: '',
+    大分類: defaults.major !== undefined ? (defaults.major || '') : '',
+    中分類: defaults.minor !== undefined ? (defaults.minor || '') : '',
     タスク: '',
     担当者: '',
     優先度: getDefaultPriorityValue(),

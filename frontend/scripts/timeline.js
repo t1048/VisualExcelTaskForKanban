@@ -326,13 +326,10 @@ function renderLegend() {
 }
 
 function collectBacklogTasks(rangeFrom, rangeTo) {
-  if (!rangeFrom || !rangeTo || rangeFrom > rangeTo) {
-    return TASKS.filter(task => !parseISO(task.期限));
-  }
   return TASKS.filter(task => {
     const due = parseISO(task.期限);
-    if (!due) return true;
-    return due < rangeFrom || due > rangeTo;
+    const assignee = String(task.担当者 ?? '').trim();
+    return !due || !assignee;
   });
 }
 
@@ -567,6 +564,20 @@ function renderTaskChip(task) {
     no.textContent = `No.${task.No}`;
     meta.appendChild(no);
   }
+  const majorLabel = String(task.大分類 ?? '').trim();
+  const major = document.createElement('span');
+  major.textContent = `大分類: ${majorLabel || '未設定'}`;
+  meta.appendChild(major);
+
+  const minorLabel = String(task.中分類 ?? '').trim();
+  const minor = document.createElement('span');
+  minor.textContent = `中分類: ${minorLabel || '未設定'}`;
+  meta.appendChild(minor);
+
+  const priorityLabel = String(task.優先度 ?? '').trim();
+  const priority = document.createElement('span');
+  priority.textContent = `重要度: ${priorityLabel || '未設定'}`;
+  meta.appendChild(priority);
   if (task.備考) {
     const notes = document.createElement('span');
     notes.textContent = task.備考;
