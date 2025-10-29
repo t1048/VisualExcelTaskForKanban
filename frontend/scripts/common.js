@@ -709,6 +709,64 @@
     return Number.isNaN(dt.getTime()) ? null : dt;
   }
 
+  function formatDateInputValue(date) {
+    if (!date) return '';
+    const dt = date instanceof Date ? new Date(date.getTime()) : parseISODate(date);
+    if (!dt || Number.isNaN(dt.getTime())) return '';
+    const year = dt.getFullYear();
+    const month = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function startOfWeek(date) {
+    const base = date instanceof Date ? new Date(date.getTime()) : parseISODate(date);
+    if (!base || Number.isNaN(base.getTime())) return null;
+    base.setHours(0, 0, 0, 0);
+    base.setDate(base.getDate() - base.getDay());
+    return base;
+  }
+
+  function endOfWeek(date) {
+    const start = startOfWeek(date);
+    if (!start) return null;
+    const end = new Date(start.getTime());
+    end.setDate(start.getDate() + 6);
+    return end;
+  }
+
+  function getDueFilterPreset(presetName, options = {}) {
+    const name = String(presetName ?? '').trim();
+    const todayBase = options.today instanceof Date
+      ? new Date(options.today.getTime())
+      : new Date();
+    todayBase.setHours(0, 0, 0, 0);
+
+    const result = { mode: 'none', from: '', to: '' };
+
+    if (name === 'this-week') {
+      const weekEnd = endOfWeek(todayBase);
+      if (!weekEnd) return null;
+      result.mode = 'before';
+      result.from = formatDateInputValue(weekEnd);
+      return result;
+    }
+
+    if (name === 'next-week') {
+      const weekStart = startOfWeek(todayBase);
+      if (!weekStart) return null;
+      const nextWeekStart = new Date(weekStart.getTime());
+      nextWeekStart.setDate(weekStart.getDate() + 7);
+      const nextWeekEnd = new Date(nextWeekStart.getTime());
+      nextWeekEnd.setDate(nextWeekStart.getDate() + 6);
+      result.mode = 'before';
+      result.from = formatDateInputValue(nextWeekEnd);
+      return result;
+    }
+
+    return null;
+  }
+
   function isCompletedStatus(value) {
     const text = String(value ?? '').trim();
     if (!text) return false;
@@ -1104,5 +1162,6 @@
     DEFAULT_STATUSES,
     UNSET_STATUS_LABEL,
     getPriorityLevel,
+    getDueFilterPreset,
   };
 }(window));

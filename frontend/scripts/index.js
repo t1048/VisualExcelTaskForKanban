@@ -21,6 +21,7 @@ const {
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
   getPriorityLevel,
+  getDueFilterPreset,
 } = window.TaskAppCommon;
 
 let api;                  // 実際に使う API （後で差し替える）
@@ -870,6 +871,27 @@ function buildFiltersUI() {
   modeSel.onchange = () => { FILTERS.date.mode = modeSel.value; updateVisibility(); renderBoard(); };
   fromEl.onchange = () => { FILTERS.date.from = fromEl.value; renderBoard(); };
   toEl.onchange = () => { FILTERS.date.to = toEl.value; renderBoard(); };
+
+  const applyDuePreset = (presetName) => {
+    const preset = getDueFilterPreset(presetName);
+    if (!preset) return;
+    FILTERS.date.mode = preset.mode;
+    FILTERS.date.from = preset.from;
+    FILTERS.date.to = preset.to;
+    modeSel.value = FILTERS.date.mode;
+    fromEl.value = FILTERS.date.from;
+    toEl.value = FILTERS.date.to;
+    updateVisibility();
+    renderBoard();
+  };
+
+  document.querySelectorAll('[data-due-preset]').forEach(btn => {
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => {
+      applyDuePreset(btn.dataset.duePreset || '');
+    });
+  });
 
   // 解除ボタン
   document.getElementById('btn-clear-filters').onclick = () => {
