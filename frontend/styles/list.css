@@ -420,6 +420,44 @@ table.task-list tbody tr.group-row:hover {
   background: transparent;
 }
 
+.group-context-menu {
+  position: absolute;
+  z-index: 2000;
+  min-width: 200px;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.55);
+  padding: 6px 0;
+  display: none;
+  backdrop-filter: blur(8px);
+}
+
+.group-context-menu.is-visible {
+  display: block;
+}
+
+.group-context-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-context-menu-item:hover,
+.group-context-menu-item:focus {
+  background: rgba(59, 130, 246, 0.18);
+  color: #f8fafc;
+  outline: none;
+}
+
 
 table.task-list thead th .column-resizer {
   position: absolute;
