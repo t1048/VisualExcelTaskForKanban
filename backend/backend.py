@@ -301,8 +301,11 @@ class TaskStore:
         if isinstance(value, str):
             text = value.strip()
             if col_name == "備考" and text:
-                normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-                text = normalized.replace("\n", "\r\n")
+                # Excel セル内での改行は LF ("\n") で扱われるが、入力元によっては
+                # CRLF ("\r\n") や単独の CR ("\r") が混在することがある。
+                # CR を維持したまま保存すると Excel 上では 1 回の改行が複数回に
+                # 表示されてしまうため、LF のみに正規化して書き込む。
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
             return text if text else None
 
         return value
