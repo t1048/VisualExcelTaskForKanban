@@ -344,6 +344,15 @@
     };
   }
 
+  function getPriorityLevel(value) {
+    const label = String(value ?? '').trim();
+    if (!label) return 'unset';
+    if (label === '低') return 'low';
+    if (label === '中') return 'medium';
+    if (label === '高') return 'high';
+    return 'custom';
+  }
+
   function setupRuntime({ onInit, onRealtimeUpdate, onApiChanged, mockApiFactory } = {}) {
     const state = {
       api: null,
@@ -807,5 +816,6 @@
     PRIORITY_DEFAULT_OPTIONS,
     DEFAULT_STATUSES,
     UNSET_STATUS_LABEL,
+    getPriorityLevel,
   };
 }(window));

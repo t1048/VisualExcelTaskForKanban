@@ -16,6 +16,7 @@ const {
   PRIORITY_DEFAULT_OPTIONS,
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
+  getPriorityLevel,
 } = window.TaskAppCommon;
 
 let api;                  // 実際に使う API （後で差し替える）
@@ -59,6 +60,12 @@ const WORKLOAD_HEAVY_THRESHOLD = 5;
 const FILTER_COLLAPSED_STORAGE_KEY = 'taskList.filtersCollapsed';
 const GROUP_CONTEXT_MENU_ID = 'group-context-menu';
 let GROUP_CONTEXT_STATE = null;
+
+const STATUS_CLASS_MAP = new Map([
+  ['進行中', 'status-pill--in-progress'],
+  ['保留', 'status-pill--on-hold'],
+  ['完了', 'status-pill--done'],
+]);
 
 function applyFilterCollapsedState() {
   const container = document.getElementById('filters-bar');
@@ -1087,7 +1094,12 @@ function renderList() {
     applyColumnBaseStyles(statusTd, 'status');
     const statusPill = document.createElement('span');
     statusPill.className = 'status-pill';
-    statusPill.textContent = normalizeStatusLabel(task.ステータス);
+    const statusLabel = normalizeStatusLabel(task.ステータス);
+    statusPill.textContent = statusLabel;
+    const statusClass = STATUS_CLASS_MAP.get(statusLabel);
+    if (statusClass) {
+      statusPill.classList.add(statusClass);
+    }
     statusTd.appendChild(statusPill);
     tr.appendChild(statusTd);
 
@@ -1102,6 +1114,10 @@ function renderList() {
       const pill = document.createElement('span');
       pill.className = 'priority-pill';
       pill.textContent = `優先度: ${task.優先度}`;
+      const priorityLevel = getPriorityLevel(task.優先度);
+      if (priorityLevel && priorityLevel !== 'unset' && priorityLevel !== 'custom') {
+        pill.classList.add(`priority-pill--${priorityLevel}`);
+      }
       priorityTd.appendChild(pill);
     }
     tr.appendChild(priorityTd);

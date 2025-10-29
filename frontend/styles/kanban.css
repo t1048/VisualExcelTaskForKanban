@@ -146,8 +146,27 @@ body.page-kanban {
 }
 
 .badge-priority {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.15);
+  color: #e2e8f0;
+}
+
+.badge-priority-high {
   color: #fca5a5;
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.badge-priority-medium {
+  color: #fde68a;
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.badge-priority-low {
+  color: #bbf7d0;
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
 }
 
 .card-meta {

@@ -16,6 +16,7 @@ const {
   PRIORITY_DEFAULT_OPTIONS,
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
+  getPriorityLevel,
 } = window.TaskAppCommon;
 
 let api;                  // 実際に使う API （後で差し替える）
@@ -666,6 +667,10 @@ function renderCard(task) {
     const bp = document.createElement('span');
     bp.className = 'badge badge-priority';
     bp.textContent = `優先度: ${task.優先度}`;
+    const priorityLevel = getPriorityLevel(task.優先度);
+    if (priorityLevel && priorityLevel !== 'unset' && priorityLevel !== 'custom') {
+      bp.classList.add(`badge-priority-${priorityLevel}`);
+    }
     meta.appendChild(bp);
   }
   if (task.担当者) {
