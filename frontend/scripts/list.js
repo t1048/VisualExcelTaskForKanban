@@ -56,6 +56,47 @@ const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => 
 
 const WORKLOAD_IN_PROGRESS_KEYWORDS = ['進行', '作業中', 'inprogress', 'wip'];
 const WORKLOAD_HEAVY_THRESHOLD = 5;
+const FILTER_COLLAPSED_STORAGE_KEY = 'taskList.filtersCollapsed';
+
+function applyFilterCollapsedState() {
+  const container = document.getElementById('filters-bar');
+  if (!container) return;
+
+  const toggle = container.querySelector('[data-filter-toggle]');
+  const COLLAPSED_CLASS = 'is-collapsed';
+
+  const setCollapsed = (collapsed) => {
+    container.classList.toggle(COLLAPSED_CLASS, Boolean(collapsed));
+    if (toggle) {
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
+  };
+
+  let stored = null;
+  try {
+    stored = window.localStorage?.getItem(FILTER_COLLAPSED_STORAGE_KEY) ?? null;
+  } catch (err) {
+    console.warn('[list] failed to read filter collapsed state:', err);
+  }
+
+  const collapsed = stored === '1';
+  setCollapsed(collapsed);
+
+  if (!toggle || toggle.dataset.bound === '1') {
+    return;
+  }
+
+  toggle.dataset.bound = '1';
+  toggle.addEventListener('click', () => {
+    const nextCollapsed = !container.classList.contains(COLLAPSED_CLASS);
+    setCollapsed(nextCollapsed);
+    try {
+      window.localStorage?.setItem(FILTER_COLLAPSED_STORAGE_KEY, nextCollapsed ? '1' : '0');
+    } catch (err) {
+      console.warn('[list] failed to store filter collapsed state:', err);
+    }
+  });
+}
 
 function workloadInProgressCount(entry) {
   if (!entry || typeof entry !== 'object' || !entry.statusCounts) return 0;
