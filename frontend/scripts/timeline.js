@@ -630,6 +630,36 @@ function collectAllAssignees() {
   return Array.from(assignees).sort((a, b) => a.localeCompare(b, 'ja'));
 }
 
+function setupAssigneeInputSuggestions(fassignee) {
+  const datalist = document.getElementById('modal-assignee-list');
+  if (!fassignee || !datalist) return;
+
+  const candidates = collectAllAssignees()
+    .map(name => (name === ASSIGNEE_UNASSIGNED_LABEL ? '' : String(name ?? '').trim()))
+    .filter(Boolean);
+
+  const seen = new Set();
+  datalist.innerHTML = '';
+
+  candidates.forEach(name => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const opt = document.createElement('option');
+    opt.value = name;
+    datalist.appendChild(opt);
+  });
+
+  const current = String(fassignee.value ?? '').trim();
+  if (current && !seen.has(current)) {
+    const opt = document.createElement('option');
+    opt.value = current;
+    datalist.appendChild(opt);
+    seen.add(current);
+  }
+
+  fassignee.setAttribute('list', datalist.id);
+}
+
 function enumerateDays(from, to) {
   const days = [];
   const names = ['日', '月', '火', '水', '木', '金', '土'];
@@ -759,6 +789,7 @@ function openModal(task, { mode }) {
   if (fminor) fminor.value = task.中分類 || '';
   fttl.value = task.タスク || '';
   fwho.value = task.担当者 || '';
+  setupAssigneeInputSuggestions(fwho);
   applyPriorityOptions(fprio, task.優先度, mode === 'create');
   fdue.value = (task.期限 || '').slice(0, 10);
   fnote.value = task.備考 || '';

@@ -1632,6 +1632,34 @@ function setupCategoryInputSuggestions(fmajor, fminor) {
   }
 }
 
+function setupAssigneeInputSuggestions(fassignee) {
+  const datalist = document.getElementById('modal-assignee-list');
+  if (!fassignee || !datalist) return;
+
+  const candidates = Array.isArray(TASKS) ? uniqAssignees() : [];
+  const seen = new Set();
+  datalist.innerHTML = '';
+
+  candidates.forEach(name => {
+    const text = String(name ?? '').trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    const opt = document.createElement('option');
+    opt.value = text;
+    datalist.appendChild(opt);
+  });
+
+  const current = String(fassignee.value ?? '').trim();
+  if (current && !seen.has(current)) {
+    const opt = document.createElement('option');
+    opt.value = current;
+    datalist.appendChild(opt);
+    seen.add(current);
+  }
+
+  fassignee.setAttribute('list', datalist.id);
+}
+
 function openModal(task, { mode }) {
   const modal = document.getElementById('modal');
   const title = document.getElementById('modal-title');
@@ -1663,6 +1691,7 @@ function openModal(task, { mode }) {
   setupCategoryInputSuggestions(fmajor, fminor);
   fttl.value = task.タスク || '';
   fwho.value = task.担当者 || '';
+  setupAssigneeInputSuggestions(fwho);
   applyPriorityOptions(fprio, task.優先度, mode === 'create');
   fdue.value = (task.期限 || '').slice(0, 10);
   fnote.value = task.備考 || '';
