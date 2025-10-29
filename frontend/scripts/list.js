@@ -1301,7 +1301,7 @@ function buildFiltersUI() {
   const majorSel = document.getElementById('flt-major');
   const minorSel = document.getElementById('flt-minor');
   if (majorSel && minorSel) {
-    const { majorList, minorMap } = collectCategoryOptions();
+    const { majorList, minorMap, allMinors } = collectCategoryOptions();
     let currentMajor = FILTERS.category?.major ?? CATEGORY_FILTER_ALL;
     let currentMinor = FILTERS.category?.minor ?? CATEGORY_FILTER_MINOR_ALL;
 
@@ -1316,38 +1316,42 @@ function buildFiltersUI() {
     majorSel.innerHTML = majorOptions.join('');
     majorSel.value = currentMajor;
 
-    const renderMinorOptions = () => {
-      const majorsMinors = minorMap.get(currentMajor) || [];
+    const renderMinorOptions = ({ preserve = false } = {}) => {
+      const isAllMajor = currentMajor === CATEGORY_FILTER_ALL;
+      const majorsMinors = isAllMajor ? (allMinors || []) : (minorMap.get(currentMajor) || []);
       const minorOptions = [
         `<option value="${CATEGORY_FILTER_MINOR_ALL}">（すべて）</option>`
       ].concat(majorsMinors.map(name => `<option value="${name}">${name}</option>`));
       minorSel.innerHTML = minorOptions.join('');
 
-      if (currentMajor === CATEGORY_FILTER_ALL || majorsMinors.length === 0) {
-        minorSel.disabled = true;
+      if (!preserve) {
         currentMinor = CATEGORY_FILTER_MINOR_ALL;
-        minorSel.value = CATEGORY_FILTER_MINOR_ALL;
-        FILTERS.category.minor = CATEGORY_FILTER_MINOR_ALL;
+      }
+
+      if (currentMinor !== CATEGORY_FILTER_MINOR_ALL && !majorsMinors.includes(currentMinor)) {
+        currentMinor = CATEGORY_FILTER_MINOR_ALL;
+      }
+
+      if (majorsMinors.length === 0) {
+        currentMinor = CATEGORY_FILTER_MINOR_ALL;
+        minorSel.disabled = true;
       } else {
         minorSel.disabled = false;
-        if (majorsMinors.includes(currentMinor)) {
-          minorSel.value = currentMinor;
-        } else {
-          currentMinor = CATEGORY_FILTER_MINOR_ALL;
-          minorSel.value = CATEGORY_FILTER_MINOR_ALL;
-        }
-        FILTERS.category.minor = currentMinor;
       }
+
+      FILTERS.category.minor = currentMinor;
+      minorSel.value = currentMinor;
     };
 
-    renderMinorOptions();
+    renderMinorOptions({ preserve: true });
 
     majorSel.onchange = () => {
       currentMajor = majorSel.value;
       FILTERS.category.major = currentMajor;
-      currentMinor = CATEGORY_FILTER_MINOR_ALL;
-      FILTERS.category.minor = currentMinor;
-      renderMinorOptions();
+      if (currentMajor !== CATEGORY_FILTER_ALL) {
+        currentMinor = CATEGORY_FILTER_MINOR_ALL;
+      }
+      renderMinorOptions({ preserve: currentMajor === CATEGORY_FILTER_ALL });
       renderList();
     };
 
@@ -1632,14 +1636,16 @@ function getFilteredTasks() {
   const majorFilter = FILTERS.category?.major ?? CATEGORY_FILTER_ALL;
   const minorFilter = FILTERS.category?.minor ?? CATEGORY_FILTER_MINOR_ALL;
 
+  const shouldFilterMajor = majorFilter !== CATEGORY_FILTER_ALL;
+  const shouldFilterMinor = minorFilter !== CATEGORY_FILTER_MINOR_ALL;
+
   return TASKS.filter(t => {
-    if (majorFilter !== CATEGORY_FILTER_ALL) {
+    if (shouldFilterMajor || shouldFilterMinor) {
       const major = String(t.大分類 ?? '').trim();
-      if (major !== majorFilter) return false;
-      if (minorFilter !== CATEGORY_FILTER_MINOR_ALL) {
-        const minor = String(t.中分類 ?? '').trim();
-        if (minor !== minorFilter) return false;
-      }
+      const minor = String(t.中分類 ?? '').trim();
+
+      if (shouldFilterMajor && major !== majorFilter) return false;
+      if (shouldFilterMinor && minor !== minorFilter) return false;
     }
 
     // 担当者
