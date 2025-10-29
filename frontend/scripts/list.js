@@ -405,8 +405,7 @@ function createGroupRow(type, label, count) {
 
   const title = document.createElement('span');
   title.className = 'group-label';
-  const prefix = type === 'major' ? '大分類' : '中分類';
-  title.textContent = `${prefix}: ${label}`;
+  title.textContent = label;
   cell.appendChild(title);
 
   if (typeof count === 'number' && Number.isFinite(count)) {
