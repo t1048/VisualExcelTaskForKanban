@@ -194,6 +194,13 @@
           statuses: Array.from(statusSet),
           validations: { ...validations }
         };
+      },
+      async get_state_snapshot() {
+        return {
+          tasks: withSequentialNo(),
+          statuses: Array.from(statusSet),
+          validations: { ...validations }
+        };
       }
     };
   }

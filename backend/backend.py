@@ -500,6 +500,17 @@ class TaskStore:
         with self._lock:
             return {k: list(v) for k, v in self._validations.items()}
 
+    def get_state_snapshot(self) -> Dict[str, Any]:
+        with self._lock:
+            tasks = [self._format_row(i, self._df.iloc[i]) for i in range(len(self._df))]
+            statuses = list(self._statuses)
+            validations = {k: list(v) for k, v in self._validations.items()}
+            return {
+                "tasks": tasks,
+                "statuses": statuses,
+                "validations": validations,
+            }
+
     def set_validations(self, mapping: Dict[str, List[Any]]):
         with self._lock:
             cleaned: Dict[str, List[str]] = {}
@@ -859,6 +870,9 @@ class JsApi:
 
     def get_validations(self) -> Dict[str, List[str]]:
         return self.store.get_validations()
+
+    def get_state_snapshot(self) -> Dict[str, Any]:
+        return self.store.get_state_snapshot()
 
     def update_validations(self, payload: Any) -> Dict[str, Any]:
         data = json.loads(payload) if isinstance(payload, str) else payload

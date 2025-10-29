@@ -25,6 +25,32 @@ let CURRENT_EDIT = null;
 let CURRENT_DRAG = null;
 let cleanupAutoScroll = null;
 
+const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
+
+function hasInitialExcelLoadFlag() {
+  try {
+    return window.sessionStorage?.getItem(INITIAL_LOAD_FLAG_KEY) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function markInitialExcelLoadFlag() {
+  try {
+    window.sessionStorage?.setItem(INITIAL_LOAD_FLAG_KEY, '1');
+  } catch (err) {
+    // ignore
+  }
+}
+
+function resetInitialExcelLoadFlag() {
+  try {
+    window.sessionStorage?.removeItem(INITIAL_LOAD_FLAG_KEY);
+  } catch (err) {
+    // ignore
+  }
+}
+
 const priorityHelper = createPriorityHelper({
   getValidations: () => VALIDATIONS,
   defaultOptions: PRIORITY_DEFAULT_OPTIONS,
@@ -41,11 +67,20 @@ setupRuntime({
     console.log('[calendar] run mode:', RUN_MODE);
   },
   onInit: async () => {
-    await init(true);
+    try {
+      await init(true);
+      if (RUN_MODE === 'pywebview') {
+        markInitialExcelLoadFlag();
+      }
+    } catch (err) {
+      resetInitialExcelLoadFlag();
+      throw err;
+    }
   },
-  onRealtimeUpdate: (payload) => (
-    applyStateFromPayload(payload, { fallbackToApi: false })
-  ),
+  onRealtimeUpdate: (payload) => {
+    resetInitialExcelLoadFlag();
+    return applyStateFromPayload(payload, { fallbackToApi: false });
+  },
 });
 
 ready(() => {
@@ -60,18 +95,23 @@ async function init(force = false) {
   if (force) {
     let payload = {};
     try {
-      if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
-        payload = await api.reload_from_excel();
-      } else {
-        if (typeof api.get_tasks === 'function') {
-          payload.tasks = await api.get_tasks();
-        }
-        if (typeof api.get_statuses === 'function') {
-          payload.statuses = await api.get_statuses();
-        }
-        if (typeof api.get_validations === 'function') {
-          payload.validations = await api.get_validations();
-        }
+      const isPywebview = RUN_MODE === 'pywebview';
+      let loadedViaReload = false;
+      if (isPywebview && !hasInitialExcelLoadFlag() && typeof api.reload_from_excel === 'function') {
+        payload = normalizeStatePayload(await api.reload_from_excel());
+        loadedViaReload = true;
+      }
+      if (isPywebview && !loadedViaReload && typeof api.get_state_snapshot === 'function') {
+        payload = normalizeStatePayload(await api.get_state_snapshot());
+      }
+      if (!Array.isArray(payload.tasks) && typeof api.get_tasks === 'function') {
+        payload.tasks = await api.get_tasks();
+      }
+      if (!Array.isArray(payload.statuses) && typeof api.get_statuses === 'function') {
+        payload.statuses = await api.get_statuses();
+      }
+      if (payload.validations === undefined && typeof api.get_validations === 'function') {
+        payload.validations = await api.get_validations();
       }
     } catch (err) {
       console.error('init failed', err);

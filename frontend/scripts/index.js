@@ -23,6 +23,32 @@ let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
 let WIRED = false;        // ツールバー多重バインド防止
 
+const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
+
+function hasInitialExcelLoadFlag() {
+  try {
+    return window.sessionStorage?.getItem(INITIAL_LOAD_FLAG_KEY) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function markInitialExcelLoadFlag() {
+  try {
+    window.sessionStorage?.setItem(INITIAL_LOAD_FLAG_KEY, '1');
+  } catch (err) {
+    // ignore
+  }
+}
+
+function resetInitialExcelLoadFlag() {
+  try {
+    window.sessionStorage?.removeItem(INITIAL_LOAD_FLAG_KEY);
+  } catch (err) {
+    // ignore
+  }
+}
+
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 const ASSIGNEE_FILTER_ALL = '__ALL__';
@@ -109,11 +135,20 @@ setupRuntime({
     console.log('[kanban] run mode:', RUN_MODE);
   },
   onInit: async () => {
-    await init(true);
+    try {
+      await init(true);
+      if (RUN_MODE === 'pywebview') {
+        markInitialExcelLoadFlag();
+      }
+    } catch (err) {
+      resetInitialExcelLoadFlag();
+      throw err;
+    }
   },
-  onRealtimeUpdate: (payload) => (
-    applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false })
-  ),
+  onRealtimeUpdate: (payload) => {
+    resetInitialExcelLoadFlag();
+    return applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false });
+  },
 });
 
 async function applyStateFromPayload(payload, options = {}) {
@@ -144,6 +179,7 @@ async function applyStateFromPayload(payload, options = {}) {
 }
 
 window.__kanban_receive_update = (payload) => {
+  resetInitialExcelLoadFlag();
   Promise.resolve(
     applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false })
   ).catch(err => {
@@ -246,12 +282,23 @@ function syncFilterStatuses(prevSelection) {
 async function init(force = false) {
   let payload = {};
   if (force) {
-    if (RUN_MODE === 'pywebview' && typeof api.reload_from_excel === 'function') {
+    const isPywebview = RUN_MODE === 'pywebview';
+    let loadedViaReload = false;
+    if (isPywebview && !hasInitialExcelLoadFlag() && typeof api.reload_from_excel === 'function') {
       try {
         payload = normalizeStatePayload(await api.reload_from_excel());
+        loadedViaReload = true;
       } catch (e) {
         console.warn('reload_from_excel failed, fallback to get_*', e);
         payload = {};
+      }
+    }
+
+    if (isPywebview && !loadedViaReload && typeof api.get_state_snapshot === 'function') {
+      try {
+        payload = normalizeStatePayload(await api.get_state_snapshot());
+      } catch (err) {
+        console.warn('get_state_snapshot failed:', err);
       }
     }
 
@@ -771,6 +818,7 @@ function wireToolbar() {
   });
   document.getElementById('btn-validations').addEventListener('click', () => openValidationModal());
   document.getElementById('btn-reload').addEventListener('click', async () => {
+    resetInitialExcelLoadFlag();
     try {
       const payload = await api.reload_from_excel();
       await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
