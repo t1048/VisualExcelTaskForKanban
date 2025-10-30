@@ -654,7 +654,7 @@ class TaskStore:
     def save_excel(self) -> str:
         with self._lock:
             ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = self.excel_path.with_name(
+            backup_path = Path.cwd() / (
                 f"{self.excel_path.stem}.bak_{ts}{self.excel_path.suffix}"
             )
             tmp_path = self.excel_path.with_name(
