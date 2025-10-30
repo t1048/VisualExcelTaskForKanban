@@ -6,8 +6,9 @@ import json
 import os
 import shutil
 import threading
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 import datetime as dt
 
 import tkinter as tk
@@ -39,6 +40,8 @@ TASK_COLUMNS = [
     "期限",
     "備考",
 ]
+META_ID_COLUMN = "__kanban_id"
+HIDDEN_META_COLUMNS = [META_ID_COLUMN]
 DEFAULT_STATUSES = ["未着手", "進行中", "完了", "保留"]
 DEFAULT_PRIORITY_LEVELS = ["高", "中", "低"]
 DEFAULT_VALIDATIONS: Dict[str, List[str]] = {
@@ -279,8 +282,9 @@ class TaskStore:
     def __init__(self, excel_path: Path, sheet_name: str | None = None):
         self.excel_path = excel_path
         self._lock = threading.RLock()
-        self._df = pd.DataFrame(columns=TASK_COLUMNS)
-        self._column_order: List[str] = list(TASK_COLUMNS)
+        self._meta_id_column = META_ID_COLUMN
+        self._df = pd.DataFrame(columns=TASK_COLUMNS + HIDDEN_META_COLUMNS)
+        self._column_order: List[str] = list(TASK_COLUMNS) + list(HIDDEN_META_COLUMNS)
         self._statuses: List[str] = list(DEFAULT_STATUSES)
         self._requested_sheet_name: str | None = (
             sheet_name.strip() if isinstance(sheet_name, str) and sheet_name.strip() else None
@@ -292,6 +296,9 @@ class TaskStore:
         self._last_saved_at: Optional[dt.datetime] = None
         self._last_saved_mtime: Optional[float] = None
         self._last_loaded_mtime: Optional[float] = None
+        self._dirty_row_ids: Set[str] = set()
+        self._deleted_row_ids: Set[str] = set()
+        self._last_saved_snapshot: pd.DataFrame = pd.DataFrame(columns=self._df.columns)
         self.load_excel()
 
     def load_excel(self):
@@ -344,7 +351,6 @@ class TaskStore:
             extra_columns = [col for col in df.columns if col not in TASK_COLUMNS]
             ordered_columns = TASK_COLUMNS + extra_columns
             df = df[ordered_columns].copy()
-            self._column_order = ordered_columns
 
             df = df.dropna(how="all", subset=TASK_COLUMNS).reset_index(drop=True)
 
@@ -356,21 +362,130 @@ class TaskStore:
             if "期限" in df.columns:
                 df["期限"] = pd.to_datetime(df["期限"], errors="coerce").dt.date
 
+            df = self._ensure_row_ids(df)
+            local_df = self._ensure_row_ids(self._df.copy())
+
+            excel_columns = list(df.columns)
+            local_columns = list(local_df.columns)
+            all_columns = list(
+                dict.fromkeys(excel_columns + [col for col in local_columns if col not in excel_columns])
+            )
+
+            dirty_ids = set(self._dirty_row_ids)
+            deleted_ids = set(self._deleted_row_ids)
+
+            excel_row_ids: List[str] = []
+            excel_row_map: Dict[str, pd.Series] = {}
+            for _, excel_row in df.iterrows():
+                row_id = str(excel_row[self._meta_id_column])
+                excel_row_ids.append(row_id)
+                excel_row_map[row_id] = excel_row
+
+            local_row_map: Dict[str, pd.Series] = {}
+            for _, local_row in local_df.iterrows():
+                row_id = str(local_row[self._meta_id_column])
+                local_row_map[row_id] = local_row
+
+            merged_rows: List[pd.Series] = []
+            new_dirty_ids: Set[str] = set()
+
+            for row_id in excel_row_ids:
+                if row_id in deleted_ids:
+                    continue
+                if row_id in local_row_map and row_id in dirty_ids:
+                    source_row = local_row_map[row_id]
+                    new_dirty_ids.add(row_id)
+                else:
+                    source_row = excel_row_map[row_id]
+                merged_rows.append(source_row.reindex(all_columns))
+
+            for _, local_row in local_df.iterrows():
+                row_id = str(local_row[self._meta_id_column])
+                if row_id in deleted_ids or row_id in excel_row_map:
+                    continue
+                if row_id not in dirty_ids:
+                    continue
+                merged_rows.append(local_row.reindex(all_columns))
+                new_dirty_ids.add(row_id)
+
+            if merged_rows:
+                merged_df = pd.DataFrame(merged_rows)
+                merged_df = merged_df.reindex(columns=all_columns)
+            else:
+                merged_df = pd.DataFrame(columns=all_columns)
+
+            new_excel_columns = [
+                col
+                for col in all_columns
+                if col in df.columns and col not in local_df.columns and col != self._meta_id_column
+            ]
+            for col in new_excel_columns:
+                merged_df[col] = merged_df[col].where(~merged_df[col].isna(), pd.NA)
+
+            merged_df = merged_df.dropna(how="all", subset=TASK_COLUMNS).reset_index(drop=True)
+
+            merged_df["タスク"] = merged_df["タスク"].apply(
+                lambda v: "" if pd.isna(v) else str(v).strip()
+            )
+            merged_df = merged_df[merged_df["タスク"] != ""].reset_index(drop=True)
+
+            if "期限" in merged_df.columns:
+                merged_df["期限"] = pd.to_datetime(merged_df["期限"], errors="coerce").dt.date
+
+            extra_columns = [col for col in merged_df.columns if col not in TASK_COLUMNS]
+            ordered_columns = TASK_COLUMNS + extra_columns
+            merged_df = merged_df[ordered_columns]
+            self._column_order = ordered_columns
+
+            self._df = merged_df
+            self._dirty_row_ids = new_dirty_ids
+            excel_id_set = set(excel_row_ids)
+            self._deleted_row_ids = {row_id for row_id in deleted_ids if row_id in excel_id_set}
+
+            self._last_saved_snapshot = df.reindex(columns=all_columns).copy(deep=True)
+            self._last_saved_snapshot = self._last_saved_snapshot.where(
+                ~self._last_saved_snapshot.isna(), pd.NA
+            )
+
             if self._validations.get("ステータス"):
                 base = list(self._validations["ステータス"])
                 extras = [
                     s
-                    for s in df["ステータス"].dropna().astype(str).tolist()
+                    for s in self._df["ステータス"].dropna().astype(str).tolist()
                     if s and s not in base
                 ]
                 self._statuses = base + extras
             else:
-                self._rebuild_statuses_from_df(df)
-
-            self._df = df
+                self._rebuild_statuses_from_df(self._df)
             self._last_loaded_mtime = self._get_file_mtime()
             if self._last_saved_mtime is None:
                 self._last_saved_mtime = self._last_loaded_mtime
+
+    def _generate_row_id(self) -> str:
+        return uuid.uuid4().hex
+
+    def _ensure_meta_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        if self._meta_id_column not in df.columns:
+            df[self._meta_id_column] = pd.NA
+        return df
+
+    def _ensure_row_ids(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self._ensure_meta_columns(df.copy())
+        for idx, value in df[self._meta_id_column].items():
+            if value is None or (isinstance(value, str) and not value.strip()) or pd.isna(value):
+                df.at[idx, self._meta_id_column] = self._generate_row_id()
+            else:
+                df.at[idx, self._meta_id_column] = str(value).strip()
+        return df
+
+    def _get_row_id_at_index(self, row_index: int) -> str:
+        self._df = self._ensure_meta_columns(self._df)
+        value = self._df.at[row_index, self._meta_id_column]
+        if value is None or (isinstance(value, str) and not value.strip()) or pd.isna(value):
+            new_id = self._generate_row_id()
+            self._df.at[row_index, self._meta_id_column] = new_id
+            return new_id
+        return str(value).strip()
 
     def _get_file_mtime(self) -> Optional[float]:
         try:
@@ -600,8 +715,15 @@ class TaskStore:
             }
 
             new_index = len(self._df)
-            self._df.loc[new_index] = row
+            self._df = self._ensure_meta_columns(self._df)
+            full_row = {col: pd.NA for col in self._df.columns}
+            full_row.update(row)
+            row_id = self._generate_row_id()
+            full_row[self._meta_id_column] = row_id
+            self._df.loc[new_index] = full_row
             self._ensure_status_registered(status)
+            self._dirty_row_ids.add(row_id)
+            self._deleted_row_ids.discard(row_id)
             return self._format_row(new_index, self._df.iloc[new_index])
 
     def update_task(self, no_value: int, patch: Dict[str, Any]) -> Dict[str, Any]:
@@ -637,6 +759,9 @@ class TaskStore:
             for column, value in updates.items():
                 self._df.at[row_index, column] = value
 
+            row_id = self._get_row_id_at_index(row_index)
+            self._dirty_row_ids.add(row_id)
+            self._deleted_row_ids.discard(row_id)
             return self._format_row(i, self._df.loc[row_index])
 
     def move_task(self, no_value: int, new_status: str) -> Dict[str, Any]:
@@ -648,7 +773,11 @@ class TaskStore:
                 idx = self._resolve_row_index(int(no_value))
             except KeyError:
                 return False
-            self._df = self._df.drop(index=self._df.index[idx]).reset_index(drop=True)
+            row_index = self._df.index[idx]
+            row_id = self._get_row_id_at_index(row_index)
+            self._df = self._df.drop(index=row_index).reset_index(drop=True)
+            self._dirty_row_ids.discard(row_id)
+            self._deleted_row_ids.add(row_id)
             return True
 
     def save_excel(self) -> str:
@@ -682,6 +811,10 @@ class TaskStore:
 
                 ws.delete_rows(1, ws.max_row)
                 ws.append(ordered_columns)
+                for idx, col_name in enumerate(ordered_columns, start=1):
+                    if col_name in HIDDEN_META_COLUMNS:
+                        col_letter = get_column_letter(idx)
+                        ws.column_dimensions[col_letter].hidden = True
                 for row in df.itertuples(index=False, name=None):
                     values: List[Any] = []
                     for col_name, value in zip(ordered_columns, row):
@@ -730,6 +863,10 @@ class TaskStore:
                 self._last_saved_at = dt.datetime.now()
                 self._last_saved_mtime = self._get_file_mtime()
                 self._last_loaded_mtime = self._last_saved_mtime
+                self._dirty_row_ids.clear()
+                self._deleted_row_ids.clear()
+                self._last_saved_snapshot = df.copy(deep=True)
+                self._df = df.copy()
             except Exception:
                 if tmp_path.exists():
                     try:
