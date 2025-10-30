@@ -362,7 +362,15 @@ class TaskStore:
             if "期限" in df.columns:
                 df["期限"] = pd.to_datetime(df["期限"], errors="coerce").dt.date
 
+            had_meta_column = self._meta_id_column in df.columns
+
             df = self._ensure_row_ids(df)
+            persisted_mtime: Optional[float] = None
+            if not had_meta_column:
+                persisted_mtime = self._persist_row_ids_to_workbook(df)
+                if persisted_mtime is not None:
+                    self._last_saved_at = dt.datetime.now()
+
             local_df = self._ensure_row_ids(self._df.copy())
 
             excel_columns = list(df.columns)
@@ -457,8 +465,11 @@ class TaskStore:
                 self._statuses = base + extras
             else:
                 self._rebuild_statuses_from_df(self._df)
-            self._last_loaded_mtime = self._get_file_mtime()
-            if self._last_saved_mtime is None:
+            mtime = persisted_mtime if persisted_mtime is not None else self._get_file_mtime()
+            self._last_loaded_mtime = mtime
+            if persisted_mtime is not None:
+                self._last_saved_mtime = mtime
+            elif self._last_saved_mtime is None:
                 self._last_saved_mtime = self._last_loaded_mtime
 
     def _generate_row_id(self) -> str:
@@ -477,6 +488,71 @@ class TaskStore:
             else:
                 df.at[idx, self._meta_id_column] = str(value).strip()
         return df
+
+    def _persist_row_ids_to_workbook(self, df: pd.DataFrame) -> Optional[float]:
+        sheet_name = self._sheet_name
+        if not sheet_name:
+            return None
+        try:
+            wb = load_workbook(self.excel_path)
+        except FileNotFoundError:
+            return None
+        if sheet_name not in wb.sheetnames:
+            wb.close()
+            return None
+        ws = wb[sheet_name]
+
+        header_row = list(next(ws.iter_rows(min_row=1, max_row=1, values_only=True), ()))
+        id_col_idx: Optional[int] = None
+        for idx, value in enumerate(header_row, start=1):
+            if isinstance(value, str) and value == self._meta_id_column:
+                id_col_idx = idx
+                break
+
+        changes_made = False
+        if id_col_idx is None:
+            id_col_idx = len(header_row) + 1 if header_row else 1
+            ws.cell(row=1, column=id_col_idx, value=self._meta_id_column)
+            changes_made = True
+
+        header_map: Dict[str, int] = {}
+        for col_idx in range(1, ws.max_column + 1):
+            header_value = ws.cell(row=1, column=col_idx).value
+            if isinstance(header_value, str):
+                header_map[header_value] = col_idx
+
+        column_letter = get_column_letter(id_col_idx)
+        if ws.column_dimensions[column_letter].hidden is not True:
+            ws.column_dimensions[column_letter].hidden = True
+            changes_made = True
+
+        id_values = [str(value) for value in df[self._meta_id_column].tolist()]
+        task_col_idx = header_map.get("タスク")
+        id_index = 0
+        for row_idx in range(2, ws.max_row + 1):
+            if id_index >= len(id_values):
+                break
+            if task_col_idx is not None:
+                task_cell = ws.cell(row=row_idx, column=task_col_idx).value
+                task_text = "" if task_cell is None else str(task_cell).strip()
+                if not task_text:
+                    continue
+            ws.cell(row=row_idx, column=id_col_idx).value = id_values[id_index]
+            id_index += 1
+            changes_made = True
+
+        if not changes_made:
+            wb.close()
+            return None
+
+        wb.save(self.excel_path)
+        try:
+            return self._get_file_mtime()
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
 
     def _get_row_id_at_index(self, row_index: int) -> str:
         self._df = self._ensure_meta_columns(self._df)
