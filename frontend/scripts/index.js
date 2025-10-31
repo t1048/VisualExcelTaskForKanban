@@ -365,7 +365,9 @@ function renderBoard() {
 
     // ↓ 絞り込み済みから、その列のカードを描画
     columnTasks
-      .sort((a, b) => comparePriorityValues(a.優先度, b.優先度) || (a.No || 0) - (b.No || 0))
+      .sort((a, b) => compareDueValues(a, b)
+        || comparePriorityValues(a.優先度, b.優先度)
+        || (a.No || 0) - (b.No || 0))
       .forEach(task => drop.appendChild(renderCard(task)));
 
     body.appendChild(drop);
@@ -490,6 +492,19 @@ function comparePriorityValues(a, b) {
   const kb = prioritySortKey(b);
   if (ka.weight !== kb.weight) return ka.weight - kb.weight;
   return ka.label.localeCompare(kb.label, 'ja');
+}
+
+function compareDueValues(a, b) {
+  const da = parseISO(a?.期限 || '');
+  const db = parseISO(b?.期限 || '');
+  if (da && db) {
+    const diff = da.getTime() - db.getTime();
+    if (diff !== 0) return diff;
+    return 0;
+  }
+  if (da) return -1;
+  if (db) return 1;
+  return 0;
 }
 
 function renderCard(task) {
