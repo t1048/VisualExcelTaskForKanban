@@ -795,6 +795,8 @@ function defaultListComparator(a, b, statusOrder) {
   const sa = statusOrder.has(normalizedA) ? statusOrder.get(normalizedA) : 999;
   const sb = statusOrder.has(normalizedB) ? statusOrder.get(normalizedB) : 999;
   if (sa !== sb) return sa - sb;
+  const due = compareDueValues(a, b);
+  if (due !== 0) return due;
   const pri = comparePriorityValues(a.優先度, b.優先度);
   if (pri !== 0) return pri;
   return compareNoValues(a, b);
@@ -1195,12 +1197,18 @@ function handleSortToggle(columnKey) {
   if (!column || !column.sortable) return;
 
   const idx = SORT_STATE.findIndex(entry => entry.key === columnKey);
+  const cycle = columnKey === 'due' ? ['desc', 'asc'] : ['asc', 'desc'];
+
   if (idx === -1) {
-    SORT_STATE.push({ key: columnKey, direction: 'asc' });
-  } else if (SORT_STATE[idx].direction === 'asc') {
-    SORT_STATE[idx].direction = 'desc';
+    SORT_STATE.push({ key: columnKey, direction: cycle[0] });
   } else {
-    SORT_STATE.splice(idx, 1);
+    const current = SORT_STATE[idx].direction;
+    const position = cycle.indexOf(current);
+    if (position >= 0 && position < cycle.length - 1) {
+      SORT_STATE[idx].direction = cycle[position + 1];
+    } else {
+      SORT_STATE.splice(idx, 1);
+    }
   }
 
   renderList();
