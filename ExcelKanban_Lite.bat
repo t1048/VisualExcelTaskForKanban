@@ -1,12 +1,11 @@
 @echo off
-REM Miniconda ŽÀsƒoƒbƒ`
+REM Miniconda
 
 SETLOCAL
 
-REM Miniconda ŠÂ‹«
 CALL "%USERPROFILE%\miniconda3\Scripts\activate.bat" py310
 
-python backend\backend.py --excel .\data\task.xlsx --sheet ^ƒ^ƒXƒN
+python backend\backend.py --excel .\data\task.xlsx --sheet ^�^�X�N
 popd
 
 ENDLOCAL
