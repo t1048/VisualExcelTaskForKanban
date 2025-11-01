@@ -1,11 +1,11 @@
-# VisualExcelTaskForKanban
+# ExcelKanban_Lite
 
 Excel のタスク一覧を読み込み、ドラッグ&ドロップ可能なカンバンボードとして可視化するデスクトップアプリケーションです。PyWebView を介してローカル HTML を表示し、Excel ファイルの読み込み・編集・保存、データ検証（入力規則）の同期、ファイル変更の自動反映までを Python バックエンドで担います。タスクはカンバン／リスト／タイムラインの 3 画面で閲覧・編集でき、いずれの画面からでも Excel 側の候補値や担当者別サマリーを共通で利用できます。
 
 ## ディレクトリ構成
 
 ```
-VisualExcelTaskForKanban/
+ExcelKanban_Lite/
 ├─ backend/              # Python バックエンド
 ├─ data/                 # サンプルの Excel データなど
 ├─ frontend/
@@ -99,7 +99,7 @@ PyWebView ウィンドウが開き、カンバンボードが表示されます�
 
 ### Windows 用バッチ
 
-Windows で Miniconda を利用している場合は、`tools/VisualExcelTaskForKanban.bat` を編集して利用することで、仮想環境の有効化とアプリ起動をまとめて行えます。
+Windows で Miniconda を利用している場合は、`tools/ExcelKanban_Lite.bat` を編集して利用することで、仮想環境の有効化とアプリ起動をまとめて行えます。
 
 ### Excel ファイルの自動監視
 
