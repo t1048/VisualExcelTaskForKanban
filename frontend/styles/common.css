@@ -47,12 +47,20 @@ body.page-kanban {
   backdrop-filter: blur(10px);
   box-shadow: var(--shadow);
   z-index: 100;
+  flex-wrap: wrap;
 }
 
 .toolbar .title {
   font-size: 18px;
   font-weight: 600;
   margin-right: auto;
+}
+
+.toolbar-nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .hint {
@@ -96,6 +104,15 @@ body.page-kanban {
   background: linear-gradient(135deg, #ef4444, #f97316);
   color: #f8fafc;
   border-color: transparent;
+}
+
+.btn-current {
+  background: rgba(56, 189, 248, 0.35);
+  border-color: rgba(56, 189, 248, 0.6);
+  color: #f8fafc;
+  font-weight: 600;
+  cursor: default;
+  pointer-events: none;
 }
 
 .btn-ghost {

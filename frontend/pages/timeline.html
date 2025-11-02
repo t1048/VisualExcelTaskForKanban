@@ -10,14 +10,7 @@
 </head>
 
 <body class="page-timeline">
-  <div class="toolbar">
-    <div class="title">担当者タイムライン</div>
-    <div class="toolbar-spacer"></div>
-    <button id="btn-save" class="btn btn-success">Excelへ保存</button>
-    <a href="index.html" class="btn btn-ghost">カンバン表示</a>
-    <a href="list.html" class="btn btn-ghost">リスト表示</a>
-    <a href="calendar.html" class="btn btn-ghost">カレンダー</a>
-  </div>
+  <header id="app-header"></header>
 
   <main class="page">
     <section class="panel">
@@ -79,6 +72,24 @@
     </section>
   </main>
 
+  <div id="validation-modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal-card validation-card">
+      <div class="modal-header">
+        <div class="modal-title">入力規則の設定</div>
+        <button id="btn-validation-close" class="btn btn-ghost">✕</button>
+      </div>
+      <div>
+        <p class="validation-note">1 行に 1 候補を入力してください。空行は無視されます。</p>
+        <div id="validation-editor" class="validation-editor" role="region" aria-live="polite"></div>
+      </div>
+      <div class="modal-actions">
+        <span style="flex:1"></span>
+        <button id="btn-validation-cancel" class="btn">キャンセル</button>
+        <button id="btn-validation-save" class="btn btn-success">適用</button>
+      </div>
+    </div>
+  </div>
+
   <div id="modal" class="modal" role="dialog" aria-modal="true" aria-hidden="true">
     <div class="modal-card">
       <div class="modal-header">
@@ -131,6 +142,7 @@
   </div>
 
   <script src="../scripts/common.js" defer></script>
+  <script src="../scripts/header.js" defer></script>
   <script src="../scripts/timeline.js" defer></script>
 </body>
 
