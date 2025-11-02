@@ -10,23 +10,7 @@
 </head>
 
 <body class="page-list">
-  <div class="toolbar">
-    <div class="title">タスク・リスト</div>
-    <div id="toolbar-due" class="toolbar-due" aria-live="polite">
-      <div class="toolbar-due-badges">
-        <span id="due-overdue-count" class="due-indicator due-overdue" hidden>期限超過 <span class="count">0</span> 件</span>
-        <span id="due-warning-count" class="due-indicator due-warning" hidden>期限間近 <span class="count">0</span> 件</span>
-      </div>
-      <div id="due-toast" class="due-toast" hidden></div>
-    </div>
-    <button id="btn-add" class="btn btn-primary">カード追加</button>
-    <button id="btn-save" class="btn btn-success">Excelへ保存</button>
-    <button id="btn-validations" class="btn">入力規則</button>
-    <button id="btn-reload" class="btn">再読込</button>
-    <a href="index.html" class="btn btn-ghost">カンバン表示</a>
-    <a href="timeline.html" class="btn btn-ghost">タイムライン</a>
-    <a href="calendar.html" class="btn btn-ghost">カレンダー</a>
-  </div>
+  <header id="app-header"></header>
 
   <div class="filters-bar" id="filters-bar"></div>
 
@@ -132,6 +116,7 @@
   </div>
 
   <script src="../scripts/common.js" defer></script>
+  <script src="../scripts/header.js" defer></script>
   <script src="../scripts/filter-ui.js" defer></script>
   <script src="../scripts/list.js" defer></script>
 </body>

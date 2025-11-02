@@ -25,6 +25,7 @@ let RUN_MODE = 'mock';
 let TASKS = [];
 let STATUSES = [];
 let VALIDATIONS = {};
+const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 let CURRENT_EDIT = null;
 let CURRENT_DRAG = null;
 let cleanupAutoScroll = null;
@@ -53,6 +54,23 @@ function initializeFilterPresetsState() {
 initializeFilterPresetsState();
 
 const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
+
+const headerController = window.TaskAppHeader?.initHeader({
+  title: 'タスク・カレンダー',
+  currentView: 'calendar',
+  onAdd: () => openCreate(),
+  onSave: () => handleSaveToExcel(),
+  onValidations: () => openValidationModal(),
+  onReload: () => handleReloadFromExcel(),
+});
+
+function updateHeaderDueSummary(tasks) {
+  if (headerController && typeof headerController.updateDueSummary === 'function') {
+    headerController.updateDueSummary(tasks);
+  } else {
+    window.TaskAppHeader?.updateDueSummary(tasks);
+  }
+}
 
 function hasInitialExcelLoadFlag() {
   try {
@@ -85,6 +103,7 @@ const priorityHelper = createPriorityHelper({
 const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => (
   priorityHelper.applyOptions(selectEl, currentValue, preferDefault)
 );
+const getDefaultPriorityValue = () => priorityHelper.getDefaultValue();
 
 function syncFiltersFromUI() {
   const monthInput = document.getElementById('month-picker');
@@ -317,6 +336,7 @@ async function init(force = false) {
   renderCalendar();
   renderBacklog();
   updateFilterPresetUI();
+  updateHeaderDueSummary(TASKS);
 }
 
 async function applyStateFromPayload(payload, { fallbackToApi = false } = {}) {
@@ -412,25 +432,36 @@ function wireControls() {
     });
   }
 
-  const saveBtn = document.getElementById('btn-save');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', async () => {
-      try {
-        if (typeof api?.save_excel !== 'function') {
-          alert('保存機能が利用できません。');
-          return;
-        }
-        const result = await api.save_excel();
-        const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
-        alert(message);
-      } catch (err) {
-        alert('保存に失敗: ' + (err?.message || err));
-      }
-    });
-  }
-
   setupBacklogDropTarget();
   updateMonthLabel();
+}
+
+async function handleSaveToExcel() {
+  if (!api || typeof api.save_excel !== 'function') {
+    alert('保存機能が利用できません。');
+    return;
+  }
+  try {
+    const result = await api.save_excel();
+    const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
+    alert(message);
+  } catch (err) {
+    alert('保存に失敗: ' + (err?.message || err));
+  }
+}
+
+async function handleReloadFromExcel() {
+  if (!api || typeof api.reload_from_excel !== 'function') {
+    alert('再読込機能が利用できません。');
+    return;
+  }
+  resetInitialExcelLoadFlag();
+  try {
+    const payload = await api.reload_from_excel();
+    await applyStateFromPayload(payload, { fallbackToApi: true });
+  } catch (err) {
+    alert('再読込に失敗: ' + (err?.message || err));
+  }
 }
 
 function setupBacklogDropTarget() {
@@ -905,6 +936,100 @@ function applyValidationState(raw) {
   VALIDATIONS = next;
 }
 
+function openValidationModal() {
+  const modal = document.getElementById('validation-modal');
+  const editor = document.getElementById('validation-editor');
+  if (!modal || !editor) return;
+
+  editor.innerHTML = '';
+  VALIDATION_COLUMNS.forEach(column => {
+    const item = document.createElement('div');
+    item.className = 'validation-item';
+
+    const label = document.createElement('label');
+    const id = 'val-' + btoa(unescape(encodeURIComponent(column))).replace(/=/g, '');
+    label.setAttribute('for', id);
+    label.textContent = column;
+
+    const textarea = document.createElement('textarea');
+    textarea.id = id;
+    textarea.dataset.column = column;
+    textarea.placeholder = '1 行に 1 候補を入力';
+    textarea.value = (Array.isArray(VALIDATIONS[column]) ? VALIDATIONS[column] : []).join('\n');
+    textarea.spellcheck = false;
+
+    item.appendChild(label);
+    item.appendChild(textarea);
+    editor.appendChild(item);
+  });
+
+  const closeBtn = document.getElementById('btn-validation-close');
+  const cancelBtn = document.getElementById('btn-validation-cancel');
+  const saveBtn = document.getElementById('btn-validation-save');
+
+  if (closeBtn) closeBtn.onclick = closeValidationModal;
+  if (cancelBtn) cancelBtn.onclick = closeValidationModal;
+  modal.onclick = (ev) => { if (ev.target === modal) closeValidationModal(); };
+
+  if (saveBtn) {
+    saveBtn.onclick = async () => {
+      const payload = {};
+      editor.querySelectorAll('textarea[data-column]').forEach(area => {
+        const col = area.dataset.column;
+        const lines = area.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        payload[col] = lines;
+      });
+
+      try {
+        if (typeof api?.update_validations === 'function') {
+          const res = await api.update_validations(payload);
+          if (Array.isArray(res?.statuses)) {
+            STATUSES = res.statuses;
+          }
+          const received = res?.validations ?? payload;
+          applyValidationState(received);
+        } else {
+          applyValidationState(payload);
+        }
+        ensureMonthDefault();
+        renderLegend();
+        renderCalendar();
+        renderBacklog();
+        updateFilterPresetUI();
+        updateHeaderDueSummary(TASKS);
+        closeValidationModal();
+      } catch (err) {
+        alert('入力規則の保存に失敗: ' + (err?.message || err));
+      }
+    };
+  }
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeValidationModal() {
+  const modal = document.getElementById('validation-modal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function openCreate() {
+  CURRENT_EDIT = null;
+  openModal({
+    No: '',
+    ステータス: STATUSES[0] || '未着手',
+    大分類: '',
+    中分類: '',
+    タスク: '',
+    担当者: '',
+    優先度: getDefaultPriorityValue(),
+    期限: '',
+    備考: ''
+  }, { mode: 'create' });
+}
+
 function openEdit(no) {
   const task = TASKS.find(t => t.No === no);
   if (!task) return;
@@ -992,6 +1117,7 @@ function openModal(task, { mode }) {
         renderLegend();
         renderCalendar();
         renderBacklog();
+        updateHeaderDueSummary(TASKS);
       } else {
         alert('削除できませんでした');
       }
@@ -1046,6 +1172,7 @@ function openModal(task, { mode }) {
       renderLegend();
       renderCalendar();
       renderBacklog();
+      updateHeaderDueSummary(TASKS);
     } catch (err) {
       alert('保存に失敗: ' + (err?.message || err));
     }

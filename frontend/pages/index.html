@@ -11,24 +11,7 @@
 </head>
 
 <body class="page-kanban">
-  <div class="toolbar">
-    <div class="title">タスク・カンバン</div>
-    <div class="toolbar-due" id="toolbar-due" aria-live="polite">
-      <div class="toolbar-due-badges">
-        <span id="due-overdue-count" class="due-indicator due-overdue" hidden>期限超過 <span class="count">0</span></span>
-        <span id="due-warning-count" class="due-indicator due-warning" hidden>期限間近 <span class="count">0</span></span>
-      </div>
-      <div id="due-toast" class="due-toast" hidden></div>
-    </div>
-    <button id="btn-add" class="btn btn-primary">＋ 追加</button>
-    <button id="btn-save" class="btn btn-success">Excelへ保存</button>
-    <button id="btn-validations" class="btn">入力規則</button>
-    <button id="btn-reload" class="btn">再読込</button>
-    <button id="btn-list" class="btn">リスト表示</button>
-    <button id="btn-timeline" class="btn">タイムライン</button>
-    <button id="btn-calendar" class="btn">カレンダー</button>
-    <span class="hint">ドラッグ＆ドロップで列に移動できます</span>
-  </div>
+  <header id="app-header"></header>
 
 
   <!-- フィルター -->
@@ -130,6 +113,7 @@
   </div>
 
   <script src="../scripts/common.js" defer></script>
+  <script src="../scripts/header.js" defer></script>
   <script src="../scripts/filter-ui.js" defer></script>
   <script src="../scripts/index.js" defer></script>
 </body>

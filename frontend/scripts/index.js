@@ -33,7 +33,6 @@ const {
 
 let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
-let WIRED = false;        // ツールバー多重バインド防止
 
 const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
 
@@ -79,6 +78,16 @@ const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => 
 
 const FILTER_PRESET_VIEW_KEY = 'kanban-board';
 let filterController;
+
+const headerController = window.TaskAppHeader?.initHeader({
+  title: 'タスク・カンバン',
+  currentView: 'kanban',
+  hint: 'ドラッグ＆ドロップで列に移動できます',
+  onAdd: () => openCreate(),
+  onSave: () => handleSaveToExcel(),
+  onValidations: () => openValidationModal(),
+  onReload: () => handleReloadFromExcel(),
+});
 
 function initFilterController() {
   const container = document.getElementById('filters-bar');
@@ -321,8 +330,6 @@ async function init(force = false) {
   }
 
   await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
-  // 初回＆再読込時にフィルタUIを最新へ
-  if (!WIRED) { wireToolbar(); WIRED = true; }
 }
 
 /* ===================== レンダリング ===================== */
@@ -376,7 +383,11 @@ function renderBoard() {
     board.appendChild(col);
   });
 
-  updateDueIndicators(FILTERED);
+  if (headerController && typeof headerController.updateDueSummary === 'function') {
+    headerController.updateDueSummary(FILTERED);
+  } else {
+    window.TaskAppHeader?.updateDueSummary(FILTERED);
+  }
   buildAssigneeWorkload(FILTERED);
 }
 
@@ -597,47 +608,6 @@ function renderCard(task) {
   return el;
 }
 
-function updateDueIndicators(tasks) {
-  const container = document.getElementById('toolbar-due');
-  const overdueEl = document.getElementById('due-overdue-count');
-  const warningEl = document.getElementById('due-warning-count');
-  const toastEl = document.getElementById('due-toast');
-  if (!container || !overdueEl || !warningEl || !toastEl) return;
-
-  let overdue = 0;
-  let warning = 0;
-
-  tasks.forEach(task => {
-    const state = getDueState(task);
-    if (!state) return;
-    if (state.level === 'overdue') {
-      overdue += 1;
-    } else if (state.level === 'warning') {
-      warning += 1;
-    }
-  });
-
-  overdueEl.querySelector('.count').textContent = overdue;
-  overdueEl.hidden = overdue === 0;
-
-  warningEl.querySelector('.count').textContent = warning;
-  warningEl.hidden = warning === 0;
-
-  if (overdue > 0) {
-    toastEl.hidden = false;
-    toastEl.textContent = `⚠️ 期限を過ぎたカードが ${overdue} 件あります。`;
-  } else if (warning > 0) {
-    toastEl.hidden = false;
-    toastEl.textContent = `⏰ 期限が近いカードが ${warning} 件あります。`;
-  } else {
-    toastEl.hidden = true;
-    toastEl.textContent = '';
-  }
-
-  const hasAlerts = overdue > 0 || warning > 0;
-  container.classList.toggle('active', hasAlerts);
-}
-
 /* ===================== DnD ===================== */
 async function onDropCard(e, newStatus, dropzone) {
   e.preventDefault();
@@ -657,45 +627,31 @@ async function onDropCard(e, newStatus, dropzone) {
 }
 
 /* ===================== ツールバー ===================== */
-function wireToolbar() {
-  document.getElementById('btn-add').addEventListener('click', () => openCreate());
-  document.getElementById('btn-save').addEventListener('click', async () => {
-    try {
-      const p = await api.save_excel();
-      alert('Excelへ保存しました\n' + p);
-    } catch (e) {
-      alert('保存に失敗: ' + (e?.message || e));
-    }
-  });
-  document.getElementById('btn-validations').addEventListener('click', () => openValidationModal());
-  document.getElementById('btn-reload').addEventListener('click', async () => {
-    resetInitialExcelLoadFlag();
-    try {
-      const payload = await api.reload_from_excel();
-      await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
-    } catch (e) {
-      alert('再読込に失敗: ' + (e?.message || e));
-    }
-  });
-  const timelineBtn = document.getElementById('btn-timeline');
-  if (timelineBtn) {
-    timelineBtn.addEventListener('click', () => {
-      window.location.href = 'timeline.html';
-    });
+async function handleSaveToExcel() {
+  if (!api || typeof api.save_excel !== 'function') {
+    alert('保存機能が利用できません。');
+    return;
   }
-
-  const listBtn = document.getElementById('btn-list');
-  if (listBtn) {
-    listBtn.addEventListener('click', () => {
-      window.location.href = 'list.html';
-    });
+  try {
+    const result = await api.save_excel();
+    const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
+    alert(message);
+  } catch (e) {
+    alert('保存に失敗: ' + (e?.message || e));
   }
+}
 
-  const calendarBtn = document.getElementById('btn-calendar');
-  if (calendarBtn) {
-    calendarBtn.addEventListener('click', () => {
-      window.location.href = 'calendar.html';
-    });
+async function handleReloadFromExcel() {
+  if (!api || typeof api.reload_from_excel !== 'function') {
+    alert('再読込機能が利用できません。');
+    return;
+  }
+  resetInitialExcelLoadFlag();
+  try {
+    const payload = await api.reload_from_excel();
+    await applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: true });
+  } catch (e) {
+    alert('再読込に失敗: ' + (e?.message || e));
   }
 }
 
