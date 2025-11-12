@@ -1,22 +1,16 @@
 /* ===================== ランタイム切替（mock / pywebview） ===================== */
 const {
-  createMockApi,
   sanitizeTaskRecord,
   sanitizeTaskList,
   normalizeStatePayload,
   parseISO,
   getDueState,
-  createWorkloadSummary,
   getPriorityLevel,
-  getDueFilterPreset,
 } = window.TaskAppCommon;
 
 const {
-  setupRuntime,
   hasInitialExcelLoadFlag,
-  markInitialExcelLoadFlag,
   resetInitialExcelLoadFlag,
-  bindExcelActions,
 } = window.TaskAppRuntime || {};
 
 const {
@@ -37,8 +31,9 @@ const {
     CATEGORY_FILTER_ALL,
     CATEGORY_FILTER_MINOR_ALL,
   },
-  createController: createFilterController,
 } = window.TaskFilterUI;
+
+const { createTaskPageBase } = window.TaskPageBase || {};
 
 let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
@@ -58,33 +53,6 @@ const getDefaultPriorityValue = () => priorityHelper.getDefaultValue();
 const applyPriorityOptions = (selectEl, currentValue, preferDefault = false) => (
   priorityHelper.applyOptions(selectEl, currentValue, preferDefault)
 );
-
-const FILTER_PRESET_VIEW_KEY = 'kanban-board';
-let filterController;
-
-const headerController = window.TaskAppHeader?.initHeader({
-  title: 'タスク・カンバン',
-  currentView: 'kanban',
-  hint: 'ドラッグ＆ドロップで列に移動できます',
-  onAdd: () => openCreate(),
-  onSave: () => handleSaveToExcel(),
-  onValidations: () => openValidationModal(),
-  onReload: () => handleReloadFromExcel(),
-});
-
-function initFilterController() {
-  const container = document.getElementById('filters-bar');
-  filterController = createFilterController({
-    container,
-    viewKey: FILTER_PRESET_VIEW_KEY,
-    onChange: () => {
-      renderBoard();
-    },
-    normalizeStatusLabel,
-    parseISO,
-    getDueFilterPreset,
-  });
-}
 
 const WORKLOAD_IN_PROGRESS_KEYWORDS = ['進行', '作業中', 'inprogress', 'wip'];
 const WORKLOAD_HEAVY_THRESHOLD = 5;
@@ -110,64 +78,47 @@ function workloadHighlightPredicate(entry) {
   return workloadInProgressCount(entry) > WORKLOAD_HEAVY_THRESHOLD;
 }
 
-initFilterController();
-
-const workloadSummary = createWorkloadSummary({
-  container: document.getElementById('workload-summary'),
-  getStatuses: () => STATUSES,
-  normalizeStatusLabel,
-  unassignedKey: ASSIGNEE_FILTER_UNASSIGNED,
-  unassignedLabel: ASSIGNEE_UNASSIGNED_LABEL,
-  allKey: ASSIGNEE_FILTER_ALL,
-  getActiveAssignee: () => filterController?.getFilters().assignee ?? ASSIGNEE_FILTER_ALL,
-  getDueState,
-  highlightPredicate: workloadHighlightPredicate,
-  onSelectAssignee: (value) => {
-    const next = (() => {
-      const current = filterController?.getFilters().assignee ?? ASSIGNEE_FILTER_ALL;
-      if (!value || value === ASSIGNEE_FILTER_ALL) return ASSIGNEE_FILTER_ALL;
-      if (current === value) return ASSIGNEE_FILTER_ALL;
-      return value;
-    })();
-    if (filterController) {
-      filterController.setAssignee(next);
-      const select = document.getElementById('flt-assignee');
-      if (select) {
-        select.value = next;
-      }
-    }
-  },
-});
-
-if (typeof setupRuntime === 'function') {
-  setupRuntime({
-    mockApiFactory: createMockApi,
+const pageBase = typeof createTaskPageBase === 'function'
+  ? createTaskPageBase({
+    viewKey: 'kanban-board',
+    headerOptions: {
+      title: 'タスク・カンバン',
+      currentView: 'kanban',
+      hint: 'ドラッグ＆ドロップで列に移動できます',
+      onAdd: () => openCreate(),
+      onSave: () => handleSaveToExcel(),
+      onValidations: () => openValidationModal(),
+      onReload: () => handleReloadFromExcel(),
+    },
+    onRender: () => renderBoard(),
+    onInit: () => init(true),
+    onRealtimeUpdate: (payload) => applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false }),
+    onSave: () => handleSaveToExcel(),
+    onReload: () => handleReloadFromExcel(),
     onApiChanged: ({ api: nextApi, runMode }) => {
       api = nextApi;
       RUN_MODE = runMode;
       console.log('[kanban] run mode:', RUN_MODE);
     },
-    onInit: async () => {
-      try {
-        await init(true);
-        if (RUN_MODE === 'pywebview') {
-          markInitialExcelLoadFlag?.();
-        }
-      } catch (err) {
-        resetInitialExcelLoadFlag?.();
-        throw err;
-      }
-    },
-    onRealtimeUpdate: (payload) => applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false }),
-  });
-}
+    getStatuses: () => STATUSES,
+    highlightPredicate: (entry) => workloadHighlightPredicate(entry),
+    logLabel: 'kanban',
+  })
+  : {
+    headerController: window.TaskAppHeader?.initHeader?.({
+      title: 'タスク・カンバン',
+      currentView: 'kanban',
+      hint: 'ドラッグ＆ドロップで列に移動できます',
+      onAdd: () => openCreate(),
+      onSave: () => handleSaveToExcel(),
+      onValidations: () => openValidationModal(),
+      onReload: () => handleReloadFromExcel(),
+    }),
+    filterController: null,
+    workloadSummary: null,
+  };
 
-if (typeof bindExcelActions === 'function') {
-  bindExcelActions({
-    onSave: () => handleSaveToExcel(),
-    onReload: () => handleReloadFromExcel(),
-  });
-}
+const { filterController, workloadSummary, headerController } = pageBase;
 
 async function applyStateFromPayload(payload, options = {}) {
   const { preserveFilters = true, fallbackToApi = true } = options;
@@ -200,7 +151,7 @@ async function applyStateFromPayload(payload, options = {}) {
     ? snapshot.validations
     : VALIDATIONS;
 
-  filterController.updateData({
+  filterController?.updateData({
     tasks: TASKS,
     statuses: STATUSES,
     validations: VALIDATIONS,
@@ -314,7 +265,7 @@ function renderBoard() {
 
 function buildAssigneeWorkload(tasks) {
   const list = Array.isArray(tasks) ? tasks : [];
-  workloadSummary.update(list, {
+  workloadSummary?.update(list, {
     total: list.length,
     overall: Array.isArray(TASKS) ? TASKS.length : list.length,
   });
@@ -633,7 +584,7 @@ function openValidationModal() {
         } else {
           applyValidationState(payload);
         }
-        filterController.updateData({
+        filterController?.updateData({
           tasks: TASKS,
           statuses: STATUSES,
           validations: VALIDATIONS,
@@ -659,7 +610,7 @@ function closeValidationModal() {
 }
 
 function getFilteredTasks() {
-  return filterController.applyFilters(TASKS);
+  return filterController?.applyFilters(TASKS) ?? TASKS;
 }
 
 
@@ -832,7 +783,7 @@ function openModal(task, { mode }) {
         }
         CURRENT_EDIT = null;
         closeModal();
-        filterController.updateData({
+        filterController?.updateData({
           tasks: TASKS,
           statuses: STATUSES,
           validations: VALIDATIONS,
@@ -888,7 +839,7 @@ function openModal(task, { mode }) {
         }
       }
       closeModal();
-      filterController.updateData({
+      filterController?.updateData({
         tasks: TASKS,
         statuses: STATUSES,
         validations: VALIDATIONS,
