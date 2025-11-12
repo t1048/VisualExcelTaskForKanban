@@ -23,6 +23,7 @@ const {
   PRIORITY_DEFAULT_OPTIONS,
   UNSET_STATUS_LABEL,
 } = window.TaskValidation || {};
+const { createExcelSyncHandlers } = window.TaskExcelSync || {};
 
 const presetApi = window.TaskPresets || {};
 const loadFilterPresets = presetApi.load || (() => ({ presets: [], lastApplied: null }));
@@ -35,6 +36,7 @@ let RUN_MODE = 'mock';
 let TASKS = [];
 let STATUSES = [];
 let VALIDATIONS = {};
+let excelSyncHandlers = null;
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 let CURRENT_EDIT = null;
 const ASSIGNEE_FILTER_ALL = '';
@@ -81,6 +83,44 @@ function updateHeaderDueSummary(tasks) {
   } else {
     window.TaskAppHeader?.updateDueSummary(tasks);
   }
+}
+
+if (typeof createExcelSyncHandlers === 'function') {
+  excelSyncHandlers = createExcelSyncHandlers({
+    apiAccessor: () => api,
+    onAfterValidationSave: async ({ payload, response, closeModal }) => {
+      const validationsInput = response?.validations ?? payload;
+      const baseStatuses = Array.isArray(response?.statuses) ? response.statuses : STATUSES;
+      if (Array.isArray(baseStatuses)) {
+        STATUSES = baseStatuses;
+      }
+
+      const snapshot = applyValidationState({
+        tasks: TASKS,
+        statuses: STATUSES,
+        validations: validationsInput,
+      }) || {};
+
+      TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+      if (Array.isArray(snapshot.statuses) && snapshot.statuses.length > 0) {
+        STATUSES = snapshot.statuses;
+      }
+      if (snapshot.validations && typeof snapshot.validations === 'object') {
+        VALIDATIONS = snapshot.validations;
+      }
+
+      ensureRangeDefaults();
+      renderSummary();
+      renderLegend();
+      renderAssigneeFilter();
+      renderTimeline();
+      updateHeaderDueSummary(TASKS);
+
+      if (typeof closeModal === 'function') {
+        closeModal();
+      }
+    },
+  });
 }
 
 const priorityHelper = createPriorityHelper({
@@ -493,32 +533,22 @@ function wireControls() {
 
 }
 
-async function handleSaveToExcel() {
-  if (!api || typeof api.save_excel !== 'function') {
-    alert('保存機能が利用できません。');
-    return;
+function handleSaveToExcel() {
+  if (excelSyncHandlers?.handleSaveToExcel) {
+    return excelSyncHandlers.handleSaveToExcel();
   }
-  try {
-    const result = await api.save_excel();
-    const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
-    alert(message);
-  } catch (err) {
-    alert('保存に失敗: ' + (err?.message || err));
-  }
+  alert('保存機能が利用できません。');
 }
 
 async function handleReloadFromExcel() {
-  if (!api || typeof api.reload_from_excel !== 'function') {
+  if (!excelSyncHandlers?.handleReloadFromExcel) {
     alert('再読込機能が利用できません。');
     return;
   }
-  resetInitialExcelLoadFlag();
-  try {
-    const payload = await api.reload_from_excel();
-    await applyStateFromPayload(payload, { fallbackToApi: true });
-  } catch (err) {
-    alert('再読込に失敗: ' + (err?.message || err));
-  }
+  await excelSyncHandlers.handleReloadFromExcel({
+    onBeforeReload: () => resetInitialExcelLoadFlag?.(),
+    onAfterReload: (payload) => applyStateFromPayload(payload, { fallbackToApi: true }),
+  });
 }
 
 function shiftRange(deltaDays) {
@@ -1041,101 +1071,13 @@ function sanitizeClass(value) {
   return value.replace(/[^\w-]/g, '-');
 }
 
-function openValidationModal() {
-  const modal = document.getElementById('validation-modal');
-  const editor = document.getElementById('validation-editor');
-  if (!modal || !editor) return;
-
-  editor.innerHTML = '';
-  VALIDATION_COLUMNS.forEach(column => {
-    const item = document.createElement('div');
-    item.className = 'validation-item';
-
-    const label = document.createElement('label');
-    const id = 'val-' + btoa(unescape(encodeURIComponent(column))).replace(/=/g, '');
-    label.setAttribute('for', id);
-    label.textContent = column;
-
-    const textarea = document.createElement('textarea');
-    textarea.id = id;
-    textarea.dataset.column = column;
-    textarea.placeholder = '1 行に 1 候補を入力';
-    textarea.value = (Array.isArray(VALIDATIONS[column]) ? VALIDATIONS[column] : []).join('\n');
-    textarea.spellcheck = false;
-
-    item.appendChild(label);
-    item.appendChild(textarea);
-    editor.appendChild(item);
+function openValidationModal(options = {}) {
+  if (!excelSyncHandlers?.openValidationModal) return;
+  excelSyncHandlers.openValidationModal({
+    columns: VALIDATION_COLUMNS,
+    getCurrentValues: () => VALIDATIONS,
+    onAfterRender: options.onAfterRender,
   });
-
-  const closeBtn = document.getElementById('btn-validation-close');
-  const cancelBtn = document.getElementById('btn-validation-cancel');
-  const saveBtn = document.getElementById('btn-validation-save');
-
-  if (closeBtn) closeBtn.onclick = closeValidationModal;
-  if (cancelBtn) cancelBtn.onclick = closeValidationModal;
-  modal.onclick = (ev) => { if (ev.target === modal) closeValidationModal(); };
-
-  if (saveBtn) {
-    saveBtn.onclick = async () => {
-      const payload = {};
-      editor.querySelectorAll('textarea[data-column]').forEach(area => {
-        const col = area.dataset.column;
-        const lines = area.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-        payload[col] = lines;
-      });
-
-      try {
-        if (typeof api?.update_validations === 'function') {
-          const res = await api.update_validations(payload);
-          if (Array.isArray(res?.statuses)) {
-            STATUSES = res.statuses;
-          }
-          const received = res?.validations ?? payload;
-          const snapshot = applyValidationState({
-            tasks: TASKS,
-            statuses: STATUSES,
-            validations: received,
-          }) || {};
-          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
-          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
-          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
-            ? snapshot.validations
-            : VALIDATIONS;
-        } else {
-          const snapshot = applyValidationState({
-            tasks: TASKS,
-            statuses: STATUSES,
-            validations: payload,
-          }) || {};
-          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
-          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
-          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
-            ? snapshot.validations
-            : VALIDATIONS;
-        }
-        ensureRangeDefaults();
-        renderSummary();
-        renderLegend();
-        renderAssigneeFilter();
-        renderTimeline();
-        updateHeaderDueSummary(TASKS);
-        closeValidationModal();
-      } catch (err) {
-        alert('入力規則の保存に失敗: ' + (err?.message || err));
-      }
-    };
-  }
-
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
-function closeValidationModal() {
-  const modal = document.getElementById('validation-modal');
-  if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
 }
 
 function openCreate() {
