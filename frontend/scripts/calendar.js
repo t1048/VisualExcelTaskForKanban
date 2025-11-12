@@ -4,21 +4,33 @@ const {
   sanitizeTaskRecord,
   sanitizeTaskList,
   normalizeStatePayload,
+  setupDragViewportAutoScroll,
+  parseISO: parseISODate,
+} = window.TaskAppCommon;
+
+const {
+  setupRuntime,
+  hasInitialExcelLoadFlag,
+  markInitialExcelLoadFlag,
+  resetInitialExcelLoadFlag,
+  bindExcelActions,
+} = window.TaskAppRuntime || {};
+
+const {
+  applyValidationState,
+  createPriorityHelper,
   normalizeStatusLabel,
   denormalizeStatusLabel,
-  normalizeValidationValues,
-  createPriorityHelper,
-  setupRuntime,
-  setupDragViewportAutoScroll,
-  loadFilterPresets,
-  saveFilterPreset,
-  deleteFilterPreset,
-  applyFilterPreset,
   PRIORITY_DEFAULT_OPTIONS,
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
-  parseISO: parseISODate,
-} = window.TaskAppCommon;
+} = window.TaskValidation || {};
+
+const presetApi = window.TaskPresets || {};
+const loadFilterPresets = presetApi.load || (() => ({ presets: [], lastApplied: null }));
+const saveFilterPreset = presetApi.save || (() => ({ presets: [] }));
+const deleteFilterPreset = presetApi.remove || (() => ({ presets: [], removed: false }));
+const applyFilterPreset = presetApi.apply || (() => ({ presets: [], applied: null }));
 
 let api;
 let RUN_MODE = 'mock';
@@ -53,8 +65,6 @@ function initializeFilterPresetsState() {
 
 initializeFilterPresetsState();
 
-const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
-
 const headerController = window.TaskAppHeader?.initHeader({
   title: 'タスク・カレンダー',
   currentView: 'calendar',
@@ -69,30 +79,6 @@ function updateHeaderDueSummary(tasks) {
     headerController.updateDueSummary(tasks);
   } else {
     window.TaskAppHeader?.updateDueSummary(tasks);
-  }
-}
-
-function hasInitialExcelLoadFlag() {
-  try {
-    return window.sessionStorage?.getItem(INITIAL_LOAD_FLAG_KEY) === '1';
-  } catch (err) {
-    return false;
-  }
-}
-
-function markInitialExcelLoadFlag() {
-  try {
-    window.sessionStorage?.setItem(INITIAL_LOAD_FLAG_KEY, '1');
-  } catch (err) {
-    // ignore
-  }
-}
-
-function resetInitialExcelLoadFlag() {
-  try {
-    window.sessionStorage?.removeItem(INITIAL_LOAD_FLAG_KEY);
-  } catch (err) {
-    // ignore
   }
 }
 
@@ -266,29 +252,35 @@ function updateFilterPresetUI() {
   if (deleteBtn) deleteBtn.disabled = !hasSelection;
 }
 
-setupRuntime({
-  mockApiFactory: createMockApi,
-  onApiChanged: ({ api: nextApi, runMode }) => {
-    api = nextApi;
-    RUN_MODE = runMode;
-    console.log('[calendar] run mode:', RUN_MODE);
-  },
-  onInit: async () => {
-    try {
-      await init(true);
-      if (RUN_MODE === 'pywebview') {
-        markInitialExcelLoadFlag();
+if (typeof setupRuntime === 'function') {
+  setupRuntime({
+    mockApiFactory: createMockApi,
+    onApiChanged: ({ api: nextApi, runMode }) => {
+      api = nextApi;
+      RUN_MODE = runMode;
+      console.log('[calendar] run mode:', RUN_MODE);
+    },
+    onInit: async () => {
+      try {
+        await init(true);
+        if (RUN_MODE === 'pywebview') {
+          markInitialExcelLoadFlag?.();
+        }
+      } catch (err) {
+        resetInitialExcelLoadFlag?.();
+        throw err;
       }
-    } catch (err) {
-      resetInitialExcelLoadFlag();
-      throw err;
-    }
-  },
-  onRealtimeUpdate: (payload) => {
-    resetInitialExcelLoadFlag();
-    return applyStateFromPayload(payload, { fallbackToApi: false });
-  },
-});
+    },
+    onRealtimeUpdate: (payload) => applyStateFromPayload(payload, { fallbackToApi: false }),
+  });
+}
+
+if (typeof bindExcelActions === 'function') {
+  bindExcelActions({
+    onSave: () => handleSaveToExcel(),
+    onReload: () => handleReloadFromExcel(),
+  });
+}
 
 ready(() => {
   wireControls();
@@ -304,7 +296,7 @@ async function init(force = false) {
     try {
       const isPywebview = RUN_MODE === 'pywebview';
       let loadedViaReload = false;
-      if (isPywebview && !hasInitialExcelLoadFlag() && typeof api.reload_from_excel === 'function') {
+      if (isPywebview && !hasInitialExcelLoadFlag?.() && typeof api.reload_from_excel === 'function') {
         payload = normalizeStatePayload(await api.reload_from_excel());
         loadedViaReload = true;
       }
@@ -372,8 +364,12 @@ async function applyStateFromPayload(payload, { fallbackToApi = false } = {}) {
     }
   }
 
-  let validationPayload = data.validations;
-  if (!validationPayload && fallbackToApi && typeof api?.get_validations === 'function') {
+  const hasSnapshotValidations = Object.prototype.hasOwnProperty.call(data, 'validations');
+  let validationPayload = hasSnapshotValidations ? data.validations : null;
+  const shouldFetchValidations = (!hasSnapshotValidations || validationPayload == null)
+    && fallbackToApi
+    && typeof api?.get_validations === 'function';
+  if (shouldFetchValidations) {
     try {
       validationPayload = await api.get_validations();
     } catch (err) {
@@ -381,9 +377,19 @@ async function applyStateFromPayload(payload, { fallbackToApi = false } = {}) {
       validationPayload = null;
     }
   }
-  if (validationPayload !== undefined) {
-    applyValidationState(validationPayload);
+  if (!validationPayload || typeof validationPayload !== 'object') {
+    validationPayload = VALIDATIONS;
   }
+  const snapshot = applyValidationState({
+    tasks: TASKS,
+    statuses: STATUSES,
+    validations: validationPayload,
+  }) || {};
+  TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+  STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
+  VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
+    ? snapshot.validations
+    : VALIDATIONS;
 
   ensureMonthDefault();
   maybeApplyInitialPreset();
@@ -923,19 +929,6 @@ function updateMonthLabel() {
   label.textContent = `${monthDate.getFullYear()}年${monthDate.getMonth() + 1}月のタスク`;
 }
 
-function applyValidationState(raw) {
-  const next = {};
-  if (raw && typeof raw === 'object') {
-    Object.keys(raw).forEach(key => {
-      next[key] = normalizeValidationValues(raw[key]);
-    });
-  }
-  if (!Array.isArray(next['優先度']) || next['優先度'].length === 0) {
-    next['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
-  }
-  VALIDATIONS = next;
-}
-
 function openValidationModal() {
   const modal = document.getElementById('validation-modal');
   const editor = document.getElementById('validation-editor');
@@ -987,9 +980,27 @@ function openValidationModal() {
             STATUSES = res.statuses;
           }
           const received = res?.validations ?? payload;
-          applyValidationState(received);
+          const snapshot = applyValidationState({
+            tasks: TASKS,
+            statuses: STATUSES,
+            validations: received,
+          }) || {};
+          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
+          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
+            ? snapshot.validations
+            : VALIDATIONS;
         } else {
-          applyValidationState(payload);
+          const snapshot = applyValidationState({
+            tasks: TASKS,
+            statuses: STATUSES,
+            validations: payload,
+          }) || {};
+          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
+          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
+            ? snapshot.validations
+            : VALIDATIONS;
         }
         ensureMonthDefault();
         renderLegend();
