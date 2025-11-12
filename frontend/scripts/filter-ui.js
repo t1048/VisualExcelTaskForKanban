@@ -99,12 +99,12 @@
     const duePresetSelector = config.duePresetSelector || '[data-due-preset]';
     const presetLabel = config.presetLabel || 'プリセット';
 
-    const TaskAppCommon = global.TaskAppCommon || {};
-    const loadFilterPresets = TaskAppCommon.loadFilterPresets || (() => ({ presets: [], lastApplied: null }));
-    const saveFilterPreset = TaskAppCommon.saveFilterPreset || (() => ({ presets: [] }));
-    const deleteFilterPreset = TaskAppCommon.deleteFilterPreset || (() => ({ presets: [], removed: false }));
-    const applyFilterPresetInternal = TaskAppCommon.applyFilterPreset || (() => ({ presets: [], applied: null }));
-    const UNSET_STATUS_LABEL = TaskAppCommon.UNSET_STATUS_LABEL || 'ステータス未設定';
+    const presetsApi = global.TaskPresets || {};
+    const loadFilterPresets = presetsApi.load || (() => ({ presets: [], lastApplied: null }));
+    const saveFilterPreset = presetsApi.save || (() => ({ presets: [] }));
+    const removeFilterPreset = presetsApi.remove || (() => ({ presets: [], removed: false }));
+    const applyFilterPresetInternal = presetsApi.apply || (() => ({ presets: [], applied: null }));
+    const UNSET_STATUS_LABEL = global.TaskValidation?.UNSET_STATUS_LABEL || 'ステータス未設定';
 
     renderHeaderTemplate(container, { presetLabel });
 
@@ -475,7 +475,7 @@
         if (!window.confirm(`プリセット「${targetName}」を削除しますか？`)) {
           return;
         }
-        const result = deleteFilterPreset(viewKey, targetName);
+        const result = removeFilterPreset(viewKey, targetName);
         presets = result.presets;
         if (activePreset === targetName) {
           activePreset = '';

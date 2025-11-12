@@ -2,232 +2,45 @@
 (function (global) {
   'use strict';
 
-  const PRIORITY_DEFAULT_OPTIONS = ['高', '中', '低'];
-  const DEFAULT_STATUSES = ['未着手', '進行中', '完了', '保留'];
-  const UNSET_STATUS_LABEL = 'ステータス未設定';
-  const FILTER_PRESET_STORAGE_KEY = 'kanban:filterPresets';
-
-  function clonePlain(value) {
-    if (value === null || value === undefined) return value;
-    if (Array.isArray(value)) {
-      return value.map(item => clonePlain(item));
-    }
-    if (value instanceof Set) {
-      return Array.from(value).map(item => clonePlain(item));
-    }
-    if (value instanceof Date) {
-      const time = value.getTime();
-      return Number.isNaN(time) ? null : value.toISOString();
-    }
-    if (typeof value === 'object') {
-      const result = {};
-      Object.keys(value).forEach(key => {
-        const entry = value[key];
-        if (typeof entry === 'function' || entry === undefined) return;
-        result[key] = clonePlain(entry);
-      });
-      return result;
-    }
-    return value;
-  }
-
-  function sanitizePresetEntry(raw) {
-    if (!raw || typeof raw !== 'object') return null;
-    const name = String(raw.name ?? '').trim();
-    if (!name) return null;
-    const filters = clonePlain(raw.filters ?? {});
-    const updatedAt = Number(raw.updatedAt);
-    const lastAppliedAt = Number(raw.lastAppliedAt);
-    const preset = { name, filters };
-    if (Number.isFinite(updatedAt) && updatedAt > 0) {
-      preset.updatedAt = updatedAt;
-    } else {
-      preset.updatedAt = Date.now();
-    }
-    if (Number.isFinite(lastAppliedAt) && lastAppliedAt > 0) {
-      preset.lastAppliedAt = lastAppliedAt;
-    }
-    return preset;
-  }
-
-  function readFilterPresetStore() {
-    let parsed = {};
-    let dirty = false;
-    try {
-      const stored = global.localStorage?.getItem(FILTER_PRESET_STORAGE_KEY) ?? '';
-      if (stored) {
-        try {
-          const json = JSON.parse(stored);
-          if (json && typeof json === 'object') {
-            parsed = json;
-          } else {
-            dirty = true;
-          }
-        } catch (err) {
-          console.warn('[kanban] failed to parse filter presets storage', err);
-          dirty = true;
-          parsed = {};
-        }
-      }
-    } catch (err) {
-      console.warn('[kanban] failed to read filter presets storage', err);
-      parsed = {};
-    }
-
-    const map = {};
-    Object.keys(parsed).forEach(key => {
-      const list = Array.isArray(parsed[key]) ? parsed[key] : [];
-      if (!Array.isArray(parsed[key])) dirty = true;
-      const sanitized = [];
-      list.forEach(item => {
-        const preset = sanitizePresetEntry(item);
-        if (preset) {
-          sanitized.push(preset);
-        } else {
-          dirty = true;
-        }
-      });
-      map[key] = sanitized;
-      if (sanitized.length !== list.length) dirty = true;
-    });
-
-    return { map, dirty };
-  }
-
-  function writeFilterPresetStore(store) {
-    try {
-      global.localStorage?.setItem(FILTER_PRESET_STORAGE_KEY, JSON.stringify(store));
-    } catch (err) {
-      console.warn('[kanban] failed to store filter presets', err);
-    }
-  }
-
-  function clonePresetEntry(preset) {
-    if (!preset || typeof preset !== 'object') return null;
-    const cloned = {
-      name: preset.name,
-      filters: clonePlain(preset.filters ?? {}),
+  const validationExports = global.TaskValidation || {};
+  const PRIORITY_DEFAULT_OPTIONS = Array.isArray(validationExports.PRIORITY_DEFAULT_OPTIONS)
+    ? validationExports.PRIORITY_DEFAULT_OPTIONS
+    : ['高', '中', '低'];
+  const DEFAULT_STATUSES = Array.isArray(validationExports.DEFAULT_STATUSES)
+    ? validationExports.DEFAULT_STATUSES
+    : ['未着手', '進行中', '完了', '保留'];
+  const UNSET_STATUS_LABEL = validationExports.UNSET_STATUS_LABEL || 'ステータス未設定';
+  const normalizeStatusLabel = typeof validationExports.normalizeStatusLabel === 'function'
+    ? validationExports.normalizeStatusLabel
+    : (value) => {
+      const text = String(value ?? '').trim();
+      return text || UNSET_STATUS_LABEL;
     };
-    if (Number.isFinite(preset.updatedAt)) {
-      cloned.updatedAt = preset.updatedAt;
-    }
-    if (Number.isFinite(preset.lastAppliedAt)) {
-      cloned.lastAppliedAt = preset.lastAppliedAt;
-    }
-    return cloned;
-  }
-
-  function clonePresetList(list) {
-    if (!Array.isArray(list)) return [];
-    return list.map(item => clonePresetEntry(item)).filter(Boolean);
-  }
-
-  function loadFilterPresets(viewKey) {
-    const key = String(viewKey ?? '').trim();
-    if (!key) {
-      return { presets: [], lastApplied: null };
-    }
-    const { map, dirty } = readFilterPresetStore();
-    if (dirty) {
-      writeFilterPresetStore(map);
-    }
-    const list = Array.isArray(map[key]) ? map[key] : [];
-    const presets = clonePresetList(list);
-    let lastApplied = null;
-    presets.forEach(preset => {
-      if (!preset) return;
-      const ts = Number(preset.lastAppliedAt);
-      if (!Number.isFinite(ts)) return;
-      if (!lastApplied || ts > Number(lastApplied.lastAppliedAt || 0)) {
-        lastApplied = preset;
-      }
-    });
-    return { presets, lastApplied };
-  }
-
-  function saveFilterPreset(viewKey, presetName, filters, options = {}) {
-    const key = String(viewKey ?? '').trim();
-    const name = String(presetName ?? '').trim();
-    if (!key || !name) {
-      return { presets: [], saved: null };
-    }
-    const { map } = readFilterPresetStore();
-    const list = Array.isArray(map[key]) ? map[key] : [];
-    const now = Date.now();
-    const normalizedFilters = clonePlain(filters ?? {});
-    const idx = list.findIndex(item => item?.name === name);
-    let entry;
-    if (idx >= 0) {
-      entry = { ...list[idx], name, filters: normalizedFilters, updatedAt: now };
-      if (options.markAsApplied !== false) {
-        entry.lastAppliedAt = now;
-      }
-      list[idx] = entry;
-    } else {
-      entry = { name, filters: normalizedFilters, updatedAt: now };
-      if (options.markAsApplied !== false) {
-        entry.lastAppliedAt = now;
-      }
-      list.push(entry);
-    }
-    map[key] = list;
-    writeFilterPresetStore(map);
-    return { presets: clonePresetList(list), saved: clonePresetEntry(entry) };
-  }
-
-  function deleteFilterPreset(viewKey, presetName) {
-    const key = String(viewKey ?? '').trim();
-    const name = String(presetName ?? '').trim();
-    if (!key || !name) {
-      return { presets: [], removed: false };
-    }
-    const { map, dirty } = readFilterPresetStore();
-    const list = Array.isArray(map[key]) ? map[key] : [];
-    const idx = list.findIndex(item => item?.name === name);
-    if (idx < 0) {
-      if (dirty) {
-        writeFilterPresetStore(map);
-      }
-      return { presets: clonePresetList(list), removed: false };
-    }
-    list.splice(idx, 1);
-    map[key] = list;
-    writeFilterPresetStore(map);
-    return { presets: clonePresetList(list), removed: true };
-  }
-
-  function applyFilterPreset(viewKey, presetName, applyFn) {
-    const key = String(viewKey ?? '').trim();
-    const name = String(presetName ?? '').trim();
-    if (!key || !name || typeof applyFn !== 'function') {
-      return { presets: [], applied: null };
-    }
-    const { map, dirty } = readFilterPresetStore();
-    const list = Array.isArray(map[key]) ? map[key] : [];
-    const idx = list.findIndex(item => item?.name === name);
-    if (idx < 0) {
-      if (dirty) {
-        writeFilterPresetStore(map);
-      }
-      return { presets: clonePresetList(list), applied: null };
-    }
-    const target = list[idx];
-    const payload = clonePlain(target.filters ?? {});
-    const result = applyFn(payload, clonePresetEntry(target));
-    if (result === false) {
-      if (dirty) {
-        writeFilterPresetStore(map);
-      }
-      return { presets: clonePresetList(list), applied: null };
-    }
-    target.lastAppliedAt = Date.now();
-    map[key] = list;
-    writeFilterPresetStore(map);
-    return {
-      presets: clonePresetList(list),
-      applied: clonePresetEntry(target),
+  const denormalizeStatusLabel = typeof validationExports.denormalizeStatusLabel === 'function'
+    ? validationExports.denormalizeStatusLabel
+    : (value) => {
+      const text = String(value ?? '').trim();
+      return text === UNSET_STATUS_LABEL ? '' : text;
     };
-  }
+  const normalizeValidationValues = typeof validationExports.normalizeValidationValues === 'function'
+    ? validationExports.normalizeValidationValues
+    : (rawList) => {
+      if (!Array.isArray(rawList)) return [];
+      const seen = new Set();
+      const values = [];
+      rawList.forEach(v => {
+        const text = String(v ?? '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        values.push(text);
+      });
+      return values;
+    };
+  const createPriorityHelper = typeof validationExports.createPriorityHelper === 'function'
+    ? validationExports.createPriorityHelper
+    : () => {
+      throw new Error('createPriorityHelper is not available');
+    };
 
   function ready(fn) {
     if (document.readyState !== 'loading') {
@@ -467,113 +280,6 @@
     return {};
   }
 
-  function normalizeStatusLabel(value) {
-    const text = String(value ?? '').trim();
-    return text || UNSET_STATUS_LABEL;
-  }
-
-  function denormalizeStatusLabel(value) {
-    const text = String(value ?? '').trim();
-    return text === UNSET_STATUS_LABEL ? '' : text;
-  }
-
-  function normalizeValidationValues(rawList) {
-    if (!Array.isArray(rawList)) return [];
-    const seen = new Set();
-    const values = [];
-    rawList.forEach(v => {
-      const text = String(v ?? '').trim();
-      if (!text || seen.has(text)) return;
-      seen.add(text);
-      values.push(text);
-    });
-    return values;
-  }
-
-  function createPriorityHelper({ getValidations, defaultOptions = PRIORITY_DEFAULT_OPTIONS } = {}) {
-    if (typeof getValidations !== 'function') {
-      throw new Error('createPriorityHelper requires getValidations function');
-    }
-
-    const getOptions = () => {
-      const source = getValidations() || {};
-      const base = Array.isArray(source['優先度']) && source['優先度'].length > 0
-        ? source['優先度']
-        : defaultOptions;
-      const seen = new Set();
-      const options = [];
-      base.forEach((value) => {
-        const text = String(value ?? '').trim();
-        if (!text || seen.has(text)) return;
-        seen.add(text);
-        options.push(text);
-      });
-      if (options.length === 0) {
-        defaultOptions.forEach((value) => {
-          if (!seen.has(value)) {
-            seen.add(value);
-            options.push(value);
-          }
-        });
-      }
-      return options;
-    };
-
-    const getDefaultValue = () => {
-      const options = getOptions();
-      if (options.includes('中')) return '中';
-      return options[0] || '';
-    };
-
-    const applyOptions = (selectEl, currentValue, preferDefault = false) => {
-      if (!selectEl) return;
-      const normalized = currentValue === null || currentValue === undefined
-        ? ''
-        : String(currentValue).trim();
-      const options = getOptions();
-      const fragments = [];
-      const addOption = (value, label = value) => {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = label;
-        fragments.push(opt);
-      };
-
-      if (!normalized && !preferDefault) {
-        addOption('', '（未設定）');
-      }
-      options.forEach(value => addOption(value));
-      if (normalized && !options.includes(normalized)) {
-        addOption(normalized);
-      }
-
-      selectEl.innerHTML = '';
-      fragments.forEach(opt => selectEl.appendChild(opt));
-
-      const values = Array.from(selectEl.options).map(opt => opt.value);
-      let selection = normalized;
-      if (!selection || !values.includes(selection)) {
-        if (preferDefault) {
-          selection = getDefaultValue();
-        } else if (values.includes('')) {
-          selection = '';
-        } else {
-          selection = getDefaultValue();
-        }
-      }
-      if (!values.includes(selection)) {
-        selection = values[0] || '';
-      }
-      selectEl.value = selection;
-    };
-
-    return {
-      getOptions,
-      getDefaultValue,
-      applyOptions,
-    };
-  }
-
   function getPriorityLevel(value) {
     const label = String(value ?? '').trim();
     if (!label) return 'unset';
@@ -581,66 +287,6 @@
     if (label === '中') return 'medium';
     if (label === '高') return 'high';
     return 'custom';
-  }
-
-  function setupRuntime({ onInit, onRealtimeUpdate, onApiChanged, mockApiFactory } = {}) {
-    const state = {
-      api: null,
-      runMode: 'mock',
-    };
-
-    const getMockApi = () => (typeof mockApiFactory === 'function' ? mockApiFactory() : createMockApi());
-
-    const assignApi = (nextApi, runMode) => {
-      if (!nextApi) return;
-      state.api = nextApi;
-      state.runMode = runMode;
-      if (typeof onApiChanged === 'function') {
-        try {
-          onApiChanged({ api: state.api, runMode: state.runMode });
-        } catch (err) {
-          console.error('[kanban] onApiChanged callback failed', err);
-        }
-      }
-      if (typeof onInit === 'function') {
-        Promise.resolve(onInit({ api: state.api, runMode: state.runMode, force: true }))
-          .catch(err => {
-            console.error('[kanban] initialization failed', err);
-          });
-      }
-    };
-
-    global.addEventListener('pywebviewready', () => {
-      const pyApi = global.pywebview?.api;
-      if (pyApi) {
-        assignApi(pyApi, 'pywebview');
-      }
-    });
-
-    ready(() => {
-      const pyApi = global.pywebview?.api;
-      if (pyApi) {
-        assignApi(pyApi, 'pywebview');
-      } else {
-        assignApi(getMockApi(), 'mock');
-      }
-    });
-
-    global.__kanban_receive_update = (payload) => {
-      if (typeof onRealtimeUpdate !== 'function') return;
-      Promise.resolve(onRealtimeUpdate(payload)).catch(err => {
-        console.error('[kanban] failed to apply pushed payload', err);
-      });
-    };
-
-    return {
-      get api() {
-        return state.api;
-      },
-      get runMode() {
-        return state.runMode;
-      }
-    };
   }
 
   function setupDragViewportAutoScroll({ margin = 80, maxStep = 24 } = {}) {
@@ -1147,17 +793,12 @@
     denormalizeStatusLabel,
     normalizeValidationValues,
     createPriorityHelper,
-    setupRuntime,
     setupDragViewportAutoScroll,
     parseISO: parseISODate,
     isCompletedStatus,
     getDueState,
     summarizeAssigneeWorkload,
     createWorkloadSummary,
-    loadFilterPresets,
-    saveFilterPreset,
-    deleteFilterPreset,
-    applyFilterPreset,
     PRIORITY_DEFAULT_OPTIONS,
     DEFAULT_STATUSES,
     UNSET_STATUS_LABEL,

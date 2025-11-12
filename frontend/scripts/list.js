@@ -1,24 +1,33 @@
 /* ===================== ランタイム切替（mock / pywebview） ===================== */
 const {
   createMockApi,
-  ready,
   sanitizeTaskRecord,
   sanitizeTaskList,
   normalizeStatePayload,
-  normalizeStatusLabel,
-  denormalizeStatusLabel,
-  normalizeValidationValues,
-  createPriorityHelper,
-  setupRuntime,
   parseISO,
   getDueState,
   createWorkloadSummary,
-  PRIORITY_DEFAULT_OPTIONS,
-  DEFAULT_STATUSES,
-  UNSET_STATUS_LABEL,
   getPriorityLevel,
   getDueFilterPreset,
 } = window.TaskAppCommon;
+
+const {
+  setupRuntime,
+  hasInitialExcelLoadFlag,
+  markInitialExcelLoadFlag,
+  resetInitialExcelLoadFlag,
+  bindExcelActions,
+} = window.TaskAppRuntime || {};
+
+const {
+  applyValidationState,
+  createPriorityHelper,
+  normalizeStatusLabel,
+  denormalizeStatusLabel,
+  PRIORITY_DEFAULT_OPTIONS,
+  DEFAULT_STATUSES,
+  UNSET_STATUS_LABEL,
+} = window.TaskValidation || {};
 
 const {
   constants: {
@@ -33,32 +42,6 @@ const {
 
 let api;                  // 実際に使う API （後で差し替える）
 let RUN_MODE = 'mock';    // 'mock' | 'pywebview'
-
-const INITIAL_LOAD_FLAG_KEY = 'kanban:excelLoaded';
-
-function hasInitialExcelLoadFlag() {
-  try {
-    return window.sessionStorage?.getItem(INITIAL_LOAD_FLAG_KEY) === '1';
-  } catch (err) {
-    return false;
-  }
-}
-
-function markInitialExcelLoadFlag() {
-  try {
-    window.sessionStorage?.setItem(INITIAL_LOAD_FLAG_KEY, '1');
-  } catch (err) {
-    // ignore
-  }
-}
-
-function resetInitialExcelLoadFlag() {
-  try {
-    window.sessionStorage?.removeItem(INITIAL_LOAD_FLAG_KEY);
-  } catch (err) {
-    // ignore
-  }
-}
 
 /* ===================== 状態 ===================== */
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
@@ -175,29 +158,35 @@ const workloadSummary = createWorkloadSummary({
   },
 });
 
-setupRuntime({
-  mockApiFactory: createMockApi,
-  onApiChanged: ({ api: nextApi, runMode }) => {
-    api = nextApi;
-    RUN_MODE = runMode;
-    console.log('[list] run mode:', RUN_MODE);
-  },
-  onInit: async () => {
-    try {
-      await init(true);
-      if (RUN_MODE === 'pywebview') {
-        markInitialExcelLoadFlag();
+if (typeof setupRuntime === 'function') {
+  setupRuntime({
+    mockApiFactory: createMockApi,
+    onApiChanged: ({ api: nextApi, runMode }) => {
+      api = nextApi;
+      RUN_MODE = runMode;
+      console.log('[list] run mode:', RUN_MODE);
+    },
+    onInit: async () => {
+      try {
+        await init(true);
+        if (RUN_MODE === 'pywebview') {
+          markInitialExcelLoadFlag?.();
+        }
+      } catch (err) {
+        resetInitialExcelLoadFlag?.();
+        throw err;
       }
-    } catch (err) {
-      resetInitialExcelLoadFlag();
-      throw err;
-    }
-  },
-  onRealtimeUpdate: (payload) => {
-    resetInitialExcelLoadFlag();
-    return applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false });
-  },
-});
+    },
+    onRealtimeUpdate: (payload) => applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false }),
+  });
+}
+
+if (typeof bindExcelActions === 'function') {
+  bindExcelActions({
+    onSave: () => handleSaveToExcel(),
+    onReload: () => handleReloadFromExcel(),
+  });
+}
 
 const STATUS_SORT_SEQUENCE = ['', UNSET_STATUS_LABEL, '未着手', '進行中', '完了', '保留中'];
 
@@ -838,7 +827,17 @@ async function applyStateFromPayload(payload, options = {}) {
     }
   }
 
-  applyValidationState(validationPayload);
+  const snapshot = applyValidationState({
+    tasks: TASKS,
+    statuses: STATUSES,
+    validations: validationPayload,
+  }) || {};
+  TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+  STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
+  VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
+    ? snapshot.validations
+    : VALIDATIONS;
+
   filterController.updateData({
     tasks: TASKS,
     statuses: STATUSES,
@@ -848,91 +847,12 @@ async function applyStateFromPayload(payload, options = {}) {
   renderList();
 }
 
-window.__kanban_receive_update = (payload) => {
-  resetInitialExcelLoadFlag();
-  Promise.resolve(
-    applyStateFromPayload(payload, { preserveFilters: true, fallbackToApi: false })
-  ).catch(err => {
-    console.error('[kanban] failed to apply pushed payload', err);
-  });
-};
-
-function applyValidationState(raw) {
-  const next = {};
-  if (raw && typeof raw === 'object') {
-    Object.keys(raw).forEach(key => {
-      const values = normalizeValidationValues(raw[key]);
-      if (values.length > 0) {
-        next[key] = values;
-      }
-    });
-  }
-  const merged = { ...next };
-  if (!Array.isArray(merged['ステータス']) || merged['ステータス'].length === 0) {
-    merged['ステータス'] = [...DEFAULT_STATUSES];
-  }
-  if (!Array.isArray(merged['優先度']) || merged['優先度'].length === 0) {
-    merged['優先度'] = [...PRIORITY_DEFAULT_OPTIONS];
-  }
-  VALIDATIONS = merged;
-
-  const validatedStatuses = VALIDATIONS['ステータス'] || [];
-  if (validatedStatuses.length > 0) {
-    const extras = Array.isArray(STATUSES) ? STATUSES.filter(s => !validatedStatuses.includes(s)) : [];
-    STATUSES = [...validatedStatuses, ...extras];
-  }
-
-  if (!Array.isArray(STATUSES) || STATUSES.length === 0) {
-    STATUSES = [...DEFAULT_STATUSES];
-  }
-
-  const seen = new Set();
-  let ordered = [];
-  STATUSES.forEach(s => {
-    const text = String(s ?? '').trim();
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-    ordered.push(text);
-  });
-
-  let hasEmptyTaskStatus = false;
-  if (Array.isArray(TASKS)) {
-    TASKS.forEach(t => {
-      const raw = String(t?.ステータス ?? '').trim();
-      if (!raw) {
-        hasEmptyTaskStatus = true;
-        return;
-      }
-      if (seen.has(raw)) return;
-      seen.add(raw);
-      ordered.push(raw);
-    });
-  }
-
-  if (ordered.length === 0) {
-    DEFAULT_STATUSES.forEach(s => {
-      if (!seen.has(s)) {
-        ordered.push(s);
-        seen.add(s);
-      }
-    });
-  }
-
-  if (hasEmptyTaskStatus) {
-    ordered = [UNSET_STATUS_LABEL, ...ordered.filter(s => s !== UNSET_STATUS_LABEL)];
-  } else {
-    ordered = ordered.filter((s, idx) => s !== UNSET_STATUS_LABEL || ordered.indexOf(s) === idx);
-  }
-
-  STATUSES = ordered;
-}
-
 async function init(force = false) {
   let payload = {};
   if (force) {
     const isPywebview = RUN_MODE === 'pywebview';
     let loadedViaReload = false;
-    if (isPywebview && !hasInitialExcelLoadFlag() && typeof api.reload_from_excel === 'function') {
+    if (isPywebview && !hasInitialExcelLoadFlag?.() && typeof api.reload_from_excel === 'function') {
       try {
         payload = normalizeStatePayload(await api.reload_from_excel());
         loadedViaReload = true;
