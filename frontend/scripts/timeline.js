@@ -387,14 +387,21 @@ async function applyStateFromPayload(payload, { fallbackToApi = false } = {}) {
     }
   }
 
-  let validationPayload = data.validations ?? VALIDATIONS;
-  if (!validationPayload && fallbackToApi && typeof api?.get_validations === 'function') {
+  const hasSnapshotValidations = Object.prototype.hasOwnProperty.call(data, 'validations');
+  let validationPayload = hasSnapshotValidations ? data.validations : null;
+  const shouldFetchValidations = (!hasSnapshotValidations || validationPayload == null)
+    && fallbackToApi
+    && typeof api?.get_validations === 'function';
+  if (shouldFetchValidations) {
     try {
       validationPayload = await api.get_validations();
     } catch (err) {
       console.warn('get_validations failed:', err);
       validationPayload = null;
     }
+  }
+  if (!validationPayload || typeof validationPayload !== 'object') {
+    validationPayload = VALIDATIONS;
   }
 
   const snapshot = applyValidationState({
