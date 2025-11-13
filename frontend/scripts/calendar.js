@@ -25,18 +25,16 @@ const {
   DEFAULT_STATUSES,
   UNSET_STATUS_LABEL,
 } = window.TaskValidation || {};
+const { createExcelSyncHandlers } = window.TaskExcelSync || {};
 
-const presetApi = window.TaskPresets || {};
-const loadFilterPresets = presetApi.load || (() => ({ presets: [], lastApplied: null }));
-const saveFilterPreset = presetApi.save || (() => ({ presets: [] }));
-const deleteFilterPreset = presetApi.remove || (() => ({ presets: [], removed: false }));
-const applyFilterPreset = presetApi.apply || (() => ({ presets: [], applied: null }));
+const { createFilterPresetManager } = window.TaskFilterPresets || {};
 
 let api;
 let RUN_MODE = 'mock';
 let TASKS = [];
 let STATUSES = [];
 let VALIDATIONS = {};
+let excelSyncHandlers = null;
 const VALIDATION_COLUMNS = ["ステータス", "大分類", "中分類", "タスク", "担当者", "優先度", "期限", "備考"];
 let CURRENT_EDIT = null;
 let CURRENT_DRAG = null;
@@ -46,24 +44,38 @@ let FILTERS = {
   month: '',
 };
 
-const FILTER_PRESET_VIEW_KEY = 'calendar';
-let FILTER_PRESETS = [];
-let ACTIVE_FILTER_PRESET = '';
-let PRESET_INITIAL_APPLIED = false;
-
-function initializeFilterPresetsState() {
-  try {
-    const { presets, lastApplied } = loadFilterPresets(FILTER_PRESET_VIEW_KEY) || {};
-    FILTER_PRESETS = Array.isArray(presets) ? presets : [];
-    ACTIVE_FILTER_PRESET = lastApplied?.name || '';
-  } catch (err) {
-    console.warn('[calendar] failed to load filter presets', err);
-    FILTER_PRESETS = [];
-    ACTIVE_FILTER_PRESET = '';
-  }
-}
-
-initializeFilterPresetsState();
+const filterPresetManager = typeof createFilterPresetManager === 'function'
+  ? createFilterPresetManager({
+      viewKey: 'calendar',
+      selectors: {
+        select: '#calendar-preset',
+        apply: '#btn-calendar-preset-apply',
+        save: '#btn-calendar-preset-save',
+        delete: '#btn-calendar-preset-delete',
+      },
+      serialize: () => {
+        syncFiltersFromUI();
+        return {
+          month: FILTERS.month || '',
+        };
+      },
+      applyToUI: (raw) => {
+        const data = raw && typeof raw === 'object' ? raw : {};
+        const monthValue = String(data.month ?? '').trim();
+        FILTERS.month = monthValue;
+        applyFiltersToUI();
+        syncFiltersFromUI();
+        updateMonthLabel();
+        renderCalendar();
+        renderBacklog();
+      },
+    })
+  : {
+      maybeApplyInitialPreset: () => {},
+      updateUI: () => {},
+      getActivePresetName: () => '',
+      reload: () => {},
+    };
 
 const headerController = window.TaskAppHeader?.initHeader({
   title: 'タスク・カレンダー',
@@ -80,6 +92,44 @@ function updateHeaderDueSummary(tasks) {
   } else {
     window.TaskAppHeader?.updateDueSummary(tasks);
   }
+}
+
+if (typeof createExcelSyncHandlers === 'function') {
+  excelSyncHandlers = createExcelSyncHandlers({
+    apiAccessor: () => api,
+    onAfterValidationSave: async ({ payload, response, closeModal }) => {
+      const validationsInput = response?.validations ?? payload;
+      const baseStatuses = Array.isArray(response?.statuses) ? response.statuses : STATUSES;
+      if (Array.isArray(baseStatuses)) {
+        STATUSES = baseStatuses;
+      }
+
+      const snapshot = applyValidationState({
+        tasks: TASKS,
+        statuses: STATUSES,
+        validations: validationsInput,
+      }) || {};
+
+      TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
+      if (Array.isArray(snapshot.statuses) && snapshot.statuses.length > 0) {
+        STATUSES = snapshot.statuses;
+      }
+      if (snapshot.validations && typeof snapshot.validations === 'object') {
+        VALIDATIONS = snapshot.validations;
+      }
+
+      ensureMonthDefault();
+      renderLegend();
+      renderCalendar();
+      renderBacklog();
+      filterPresetManager.updateUI();
+      updateHeaderDueSummary(TASKS);
+
+      if (typeof closeModal === 'function') {
+        closeModal();
+      }
+    },
+  });
 }
 
 const priorityHelper = createPriorityHelper({
@@ -103,154 +153,6 @@ function applyFiltersToUI() {
   }
 }
 
-function serializeFiltersForPreset() {
-  return {
-    month: FILTERS.month || '',
-  };
-}
-
-function applyPresetFilters(raw) {
-  const data = raw && typeof raw === 'object' ? raw : {};
-  const monthValue = String(data.month ?? '').trim();
-  FILTERS.month = monthValue;
-  applyFiltersToUI();
-}
-
-function maybeApplyInitialPreset() {
-  if (PRESET_INITIAL_APPLIED) return;
-  PRESET_INITIAL_APPLIED = true;
-  if (!ACTIVE_FILTER_PRESET) return;
-  const preset = FILTER_PRESETS.find(item => item?.name === ACTIVE_FILTER_PRESET);
-  if (!preset) {
-    ACTIVE_FILTER_PRESET = '';
-    return;
-  }
-  applyPresetFilters(preset.filters);
-}
-
-function ensureFilterPresetHandlers() {
-  const select = document.getElementById('calendar-preset');
-  const applyBtn = document.getElementById('btn-calendar-preset-apply');
-  const saveBtn = document.getElementById('btn-calendar-preset-save');
-  const deleteBtn = document.getElementById('btn-calendar-preset-delete');
-  if (!select || !applyBtn || !saveBtn || !deleteBtn) return;
-  if (select.dataset.bound === '1') return;
-  select.dataset.bound = '1';
-
-  const refreshButtonState = () => {
-    const selected = select.value;
-    const exists = Boolean(selected) && FILTER_PRESETS.some(preset => preset?.name === selected);
-    applyBtn.disabled = !exists;
-    deleteBtn.disabled = !exists;
-  };
-
-  select.addEventListener('change', () => {
-    ACTIVE_FILTER_PRESET = select.value;
-    refreshButtonState();
-  });
-
-  applyBtn.addEventListener('click', () => {
-    const targetName = select.value;
-    if (!targetName) {
-      alert('プリセットを選択してください。');
-      return;
-    }
-    const result = applyFilterPreset(FILTER_PRESET_VIEW_KEY, targetName, (filters) => {
-      applyPresetFilters(filters);
-      return true;
-    });
-    FILTER_PRESETS = result.presets;
-    if (result.applied) {
-      ACTIVE_FILTER_PRESET = result.applied.name;
-      PRESET_INITIAL_APPLIED = true;
-      applyFiltersToUI();
-      updateMonthLabel();
-      renderCalendar();
-      renderBacklog();
-    } else {
-      alert('選択したプリセットが見つかりません。');
-      updateFilterPresetUI();
-    }
-  });
-
-  saveBtn.addEventListener('click', () => {
-    const defaultName = select.value || '';
-    const name = window.prompt('プリセット名を入力してください', defaultName);
-    if (name === null) return;
-    const trimmed = name.trim();
-    if (!trimmed) {
-      alert('プリセット名を入力してください。');
-      return;
-    }
-    syncFiltersFromUI();
-    const payload = serializeFiltersForPreset();
-    const result = saveFilterPreset(FILTER_PRESET_VIEW_KEY, trimmed, payload);
-    FILTER_PRESETS = result.presets;
-    if (result.saved) {
-      ACTIVE_FILTER_PRESET = result.saved.name;
-      PRESET_INITIAL_APPLIED = true;
-    }
-    updateFilterPresetUI();
-  });
-
-  deleteBtn.addEventListener('click', () => {
-    const targetName = select.value;
-    if (!targetName) {
-      alert('削除するプリセットを選択してください。');
-      return;
-    }
-    if (!window.confirm(`プリセット「${targetName}」を削除しますか？`)) {
-      return;
-    }
-    const result = deleteFilterPreset(FILTER_PRESET_VIEW_KEY, targetName);
-    FILTER_PRESETS = result.presets;
-    if (ACTIVE_FILTER_PRESET === targetName) {
-      ACTIVE_FILTER_PRESET = '';
-    }
-    updateFilterPresetUI();
-  });
-
-  refreshButtonState();
-}
-
-function updateFilterPresetUI() {
-  ensureFilterPresetHandlers();
-  const select = document.getElementById('calendar-preset');
-  const applyBtn = document.getElementById('btn-calendar-preset-apply');
-  const deleteBtn = document.getElementById('btn-calendar-preset-delete');
-  if (!select) return;
-
-  const previousValue = select.value;
-  select.innerHTML = '';
-
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = '（プリセット未選択）';
-  select.appendChild(placeholder);
-
-  FILTER_PRESETS.forEach(preset => {
-    if (!preset || typeof preset.name !== 'string') return;
-    const opt = document.createElement('option');
-    opt.value = preset.name;
-    opt.textContent = preset.name;
-    select.appendChild(opt);
-  });
-
-  let nextValue = '';
-  if (ACTIVE_FILTER_PRESET && FILTER_PRESETS.some(p => p?.name === ACTIVE_FILTER_PRESET)) {
-    nextValue = ACTIVE_FILTER_PRESET;
-  } else if (FILTER_PRESETS.some(p => p?.name === previousValue)) {
-    nextValue = previousValue;
-    ACTIVE_FILTER_PRESET = previousValue;
-  } else {
-    ACTIVE_FILTER_PRESET = '';
-  }
-
-  select.value = nextValue;
-  const hasSelection = Boolean(select.value);
-  if (applyBtn) applyBtn.disabled = !hasSelection;
-  if (deleteBtn) deleteBtn.disabled = !hasSelection;
-}
 
 if (typeof setupRuntime === 'function') {
   setupRuntime({
@@ -321,13 +223,13 @@ async function init(force = false) {
   }
 
   ensureMonthDefault();
-  maybeApplyInitialPreset();
+  filterPresetManager.maybeApplyInitialPreset();
   applyFiltersToUI();
   syncFiltersFromUI();
   renderLegend();
   renderCalendar();
   renderBacklog();
-  updateFilterPresetUI();
+  filterPresetManager.updateUI();
   updateHeaderDueSummary(TASKS);
 }
 
@@ -392,13 +294,13 @@ async function applyStateFromPayload(payload, { fallbackToApi = false } = {}) {
     : VALIDATIONS;
 
   ensureMonthDefault();
-  maybeApplyInitialPreset();
+  filterPresetManager.maybeApplyInitialPreset();
   applyFiltersToUI();
   syncFiltersFromUI();
   renderLegend();
   renderCalendar();
   renderBacklog();
-  updateFilterPresetUI();
+  filterPresetManager.updateUI();
 }
 
 function wireControls() {
@@ -419,7 +321,7 @@ function wireControls() {
     updateMonthLabel();
     renderCalendar();
     renderBacklog();
-    updateFilterPresetUI();
+    filterPresetManager.updateUI();
   };
 
   if (prevBtn) {
@@ -434,7 +336,7 @@ function wireControls() {
       updateMonthLabel();
       renderCalendar();
       renderBacklog();
-      updateFilterPresetUI();
+      filterPresetManager.updateUI();
     });
   }
 
@@ -442,32 +344,22 @@ function wireControls() {
   updateMonthLabel();
 }
 
-async function handleSaveToExcel() {
-  if (!api || typeof api.save_excel !== 'function') {
-    alert('保存機能が利用できません。');
-    return;
+function handleSaveToExcel() {
+  if (excelSyncHandlers?.handleSaveToExcel) {
+    return excelSyncHandlers.handleSaveToExcel();
   }
-  try {
-    const result = await api.save_excel();
-    const message = result ? `Excelへ保存しました\n${result}` : 'Excelへ保存しました';
-    alert(message);
-  } catch (err) {
-    alert('保存に失敗: ' + (err?.message || err));
-  }
+  alert('保存機能が利用できません。');
 }
 
 async function handleReloadFromExcel() {
-  if (!api || typeof api.reload_from_excel !== 'function') {
+  if (!excelSyncHandlers?.handleReloadFromExcel) {
     alert('再読込機能が利用できません。');
     return;
   }
-  resetInitialExcelLoadFlag();
-  try {
-    const payload = await api.reload_from_excel();
-    await applyStateFromPayload(payload, { fallbackToApi: true });
-  } catch (err) {
-    alert('再読込に失敗: ' + (err?.message || err));
-  }
+  await excelSyncHandlers.handleReloadFromExcel({
+    onBeforeReload: () => resetInitialExcelLoadFlag?.(),
+    onAfterReload: (payload) => applyStateFromPayload(payload, { fallbackToApi: true }),
+  });
 }
 
 function setupBacklogDropTarget() {
@@ -929,101 +821,13 @@ function updateMonthLabel() {
   label.textContent = `${monthDate.getFullYear()}年${monthDate.getMonth() + 1}月のタスク`;
 }
 
-function openValidationModal() {
-  const modal = document.getElementById('validation-modal');
-  const editor = document.getElementById('validation-editor');
-  if (!modal || !editor) return;
-
-  editor.innerHTML = '';
-  VALIDATION_COLUMNS.forEach(column => {
-    const item = document.createElement('div');
-    item.className = 'validation-item';
-
-    const label = document.createElement('label');
-    const id = 'val-' + btoa(unescape(encodeURIComponent(column))).replace(/=/g, '');
-    label.setAttribute('for', id);
-    label.textContent = column;
-
-    const textarea = document.createElement('textarea');
-    textarea.id = id;
-    textarea.dataset.column = column;
-    textarea.placeholder = '1 行に 1 候補を入力';
-    textarea.value = (Array.isArray(VALIDATIONS[column]) ? VALIDATIONS[column] : []).join('\n');
-    textarea.spellcheck = false;
-
-    item.appendChild(label);
-    item.appendChild(textarea);
-    editor.appendChild(item);
+function openValidationModal(options = {}) {
+  if (!excelSyncHandlers?.openValidationModal) return;
+  excelSyncHandlers.openValidationModal({
+    columns: VALIDATION_COLUMNS,
+    getCurrentValues: () => VALIDATIONS,
+    onAfterRender: options.onAfterRender,
   });
-
-  const closeBtn = document.getElementById('btn-validation-close');
-  const cancelBtn = document.getElementById('btn-validation-cancel');
-  const saveBtn = document.getElementById('btn-validation-save');
-
-  if (closeBtn) closeBtn.onclick = closeValidationModal;
-  if (cancelBtn) cancelBtn.onclick = closeValidationModal;
-  modal.onclick = (ev) => { if (ev.target === modal) closeValidationModal(); };
-
-  if (saveBtn) {
-    saveBtn.onclick = async () => {
-      const payload = {};
-      editor.querySelectorAll('textarea[data-column]').forEach(area => {
-        const col = area.dataset.column;
-        const lines = area.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-        payload[col] = lines;
-      });
-
-      try {
-        if (typeof api?.update_validations === 'function') {
-          const res = await api.update_validations(payload);
-          if (Array.isArray(res?.statuses)) {
-            STATUSES = res.statuses;
-          }
-          const received = res?.validations ?? payload;
-          const snapshot = applyValidationState({
-            tasks: TASKS,
-            statuses: STATUSES,
-            validations: received,
-          }) || {};
-          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
-          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
-          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
-            ? snapshot.validations
-            : VALIDATIONS;
-        } else {
-          const snapshot = applyValidationState({
-            tasks: TASKS,
-            statuses: STATUSES,
-            validations: payload,
-          }) || {};
-          TASKS = Array.isArray(snapshot.tasks) ? snapshot.tasks : TASKS;
-          STATUSES = Array.isArray(snapshot.statuses) ? snapshot.statuses : STATUSES;
-          VALIDATIONS = snapshot.validations && typeof snapshot.validations === 'object'
-            ? snapshot.validations
-            : VALIDATIONS;
-        }
-        ensureMonthDefault();
-        renderLegend();
-        renderCalendar();
-        renderBacklog();
-        updateFilterPresetUI();
-        updateHeaderDueSummary(TASKS);
-        closeValidationModal();
-      } catch (err) {
-        alert('入力規則の保存に失敗: ' + (err?.message || err));
-      }
-    };
-  }
-
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
-function closeValidationModal() {
-  const modal = document.getElementById('validation-modal');
-  if (!modal) return;
-  modal.classList.remove('open');
-  modal.setAttribute('aria-hidden', 'true');
 }
 
 function openCreate() {
